@@ -66,12 +66,32 @@ Costs are returned as `cost_usd` (float, 6 dp) **and** `cost_micro_usd` (int) �
 ```json
 { "id": "uuid", "email": "...", "display_name": "Alex", "role": "student|admin",
   "cefr_level": "A2", "goal": "travel", "learning_style": "balanced",
-  "daily_goal_minutes": 20, "gloss_langs": ["en","hi"], "onboarded": true }
+  "daily_goal_minutes": 20, "gloss_langs": ["en","hi"],
+  "native_language": "tr", "target_language": "de", "onboarded": true }
 ```
 
 ### `PATCH /api/v1/me`
-Any subset of: `display_name, cefr_level, goal, learning_style, daily_goal_minutes, gloss_langs`.
+Any subset of: `display_name, cefr_level, goal, learning_style, daily_goal_minutes,
+gloss_langs, native_language, target_language`.
 Returns the full updated object. `cefr_level` ∈ `A1 A2 B1 B2 C1`.
+
+`native_language` / `target_language` are ISO-639-1 codes validated server-side:
+- unknown native code → 422 listing the supported codes;
+- a target that isn't fully supported yet (e.g. `es`) → 422 `"'Spanish' is not
+  available yet. Currently teachable: German"`. **Render `error.message` as-is.**
+
+Setting `native_language` changes, everywhere and immediately: tutor explanations,
+writing corrections, quiz explanations, speaking feedback, and dictionary glosses
+(e.g. Tisch → *masa* for `tr`). No other client work is needed.
+
+### `GET /api/v1/languages`
+The options for both pickers — **fetch this, never hardcode the lists**:
+```json
+{ "native":  [ { "code": "ar", "name": "Arabic" }, …20 total, sorted by name ],
+  "targets": [ { "code": "de", "name": "German", "endonym": "Deutsch" } ] }
+```
+`targets` contains only languages the platform can actually teach; more appear here
+automatically when enabled server-side.
 
 ---
 

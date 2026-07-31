@@ -258,3 +258,45 @@ async def patch_me(payload: PatchMeRequest, user: CurrentUser, db: DbSession) ->
     await db.commit()
     await db.refresh(user)
     return _me_view(user)
+
+
+# ── Language options ───────────────────────────────────────────────────────────
+
+
+class NativeLanguageOut(BaseModel):
+    code: str
+    name: str
+
+
+class TargetLanguageOut(BaseModel):
+    code: str
+    name: str
+    endonym: str
+
+
+class LanguagesResponse(BaseModel):
+    native: list[NativeLanguageOut]
+    targets: list[TargetLanguageOut]
+
+
+@router.get("/languages")
+async def list_languages(user: CurrentUser) -> LanguagesResponse:
+    """The options for the native/target language pickers.
+
+    Served from the registry rather than hardcoded in the frontend, so adding a
+    language (or enabling Spanish once it meets the bar) is a backend-only change.
+    Only `fully_supported` targets are returned — the UI must not offer a language
+    the tutor would half-teach.
+    """
+    from app.ai.languages import NATIVE_LANGUAGES, enabled_targets
+
+    return LanguagesResponse(
+        native=[
+            NativeLanguageOut(code=code, name=name)
+            for code, name in sorted(NATIVE_LANGUAGES.items(), key=lambda kv: kv[1])
+        ],
+        targets=[
+            TargetLanguageOut(code=t.code, name=t.name, endonym=t.endonym)
+            for t in enabled_targets()
+        ],
+    )

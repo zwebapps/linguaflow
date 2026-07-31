@@ -274,3 +274,53 @@ src/components/
 - Build slices in order; each slice should compile and be clickable before starting the next.
 - Until my backend endpoints land, develop against **MSW mocks** shaped exactly like the contract (including a fake SSE stream) — then flip to the real API by removing the mock worker. That keeps us decoupled.
 - Ask me to change the **contract** rather than working around a shape you don't like.
+
+---
+
+## Slice 8 — ★ Native & target language picker (completes the language flow)
+
+The backend delivers **everything** in the learner's native language — tutor
+explanations, writing corrections, quiz explanations, speaking feedback, dictionary
+glosses (*Tisch → masa*). The ONLY missing piece is the UI to set it. Contract: §1.
+
+### 8.1 Data
+- [ ] `GET /api/v1/languages` → `{ native: [{code,name}], targets: [{code,name,endonym}] }`.
+      **Never hardcode the lists** — new languages appear here automatically.
+- [ ] `GET /me` now returns `native_language` and `target_language`; add both to the
+      `Me` type in `lib/types.ts` and the auth store.
+- [ ] `PATCH /me { native_language?: string, target_language?: string }` — send codes
+      (`"tr"`), not names. On 422 render `error.message` verbatim (e.g. *"'Spanish' is
+      not available yet. Currently teachable: German"*).
+
+### 8.2 Onboarding (the important surface)
+- [ ] Add a step **before** the CEFR step: **"What language do you speak?"** —
+      searchable select of the 20 `native` options, default `en`.
+- [ ] **"What do you want to learn?"** on the same step: render `targets`
+      (`German — Deutsch`). With one option, show it pre-selected rather than hiding
+      it — it sets the expectation that more are coming.
+- [ ] Include both codes in the existing onboarding `PATCH /me`.
+
+### 8.3 Settings
+- [ ] "Language" card: the same two selects, pre-filled from `/me`, saved via
+      `PATCH /me`, success toast.
+- [ ] Microcopy under the native select: *"Explanations, corrections and word
+      meanings will be in this language. German examples stay German."*
+- [ ] After a save, **invalidate/refetch the `/me` query and any open tutor thread
+      state** so the next message uses the new language.
+
+### 8.4 Display touches
+- [ ] Word popover / dictionary results: meanings arrive native-language-first —
+      render `[tr] masa` above `[en] table` in the order given; don't re-sort.
+- [ ] RTL: `ur` / `ar` / `fa` explanation text needs `dir="auto"` on message and
+      correction containers (one attribute; the browser handles the rest).
+- [ ] Optional polish: show the learner's language pair in the sidebar header
+      ("Turkish → German") from `/me`.
+
+### 8.5 Acceptance
+- [ ] New Turkish user onboards, asks the tutor *in Turkish*, gets a Turkish
+      explanation with German examples.
+- [ ] Same user taps `Tisch` in the reader → sees **masa** first.
+- [ ] Writing evaluation shows corrections explained in Turkish.
+- [ ] Switching to Spanish in Settings changes the next tutor answer's language
+      with no reload.
+- [ ] Selecting a non-teachable target shows the server's 422 message inline.
