@@ -122,7 +122,18 @@ async def lookup_word(
     await enforce_rate_limit(str(user.id), bucket="tools")
     await enforce_monthly_quota(str(user.id))
 
-    gloss_langs = tuple(payload.gloss_langs) if payload.gloss_langs else ("en",)
+    # No explicit request -> the learner's own languages. A Turkish learner
+    # tapping a word in the reader should see "masa", not only "table".
+    if payload.gloss_langs:
+        gloss_langs = tuple(payload.gloss_langs)
+    else:
+        native = getattr(user, "native_language", None) or "en"
+        profile = tuple(user.gloss_langs or ())
+        seen: list[str] = []
+        for lang in (native, *profile, "en"):
+            if lang not in seen:
+                seen.append(lang)
+        gloss_langs = tuple(seen)
     result = await dictionary.lookup(db, payload.lemma, gloss_langs=gloss_langs, user_id=user.id)
     # Only a genuine LLM fallback consumes allowance; a curated hit is free.
     if result.get("source") == "llm":

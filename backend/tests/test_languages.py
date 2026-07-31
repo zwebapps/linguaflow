@@ -121,3 +121,43 @@ def test_speaking_score_instruction_formats_cleanly() -> None:
     out = _SCORE_INSTRUCTION.format(native_language="Turkish")
     assert "Turkish" in out
     assert '{"grammar"' in out  # the JSON example survives brace-escaping
+
+
+async def test_curated_lookup_translates_missing_glosses(monkeypatch) -> None:
+    """A Turkish learner looking up 'Tisch' must see 'masa', not only 'table'.
+
+    Curated entries are hand-verified for grammar but English-only in meaning;
+    the gloss is filled by a (cached) translate call. Grammar fields must stay
+    exactly as curated — only meanings may grow.
+    """
+    from app.ai import router as ai_router
+    from app.ai.router import AIResult
+    from app.ai.tools import dictionary
+
+    async def fake_complete(db, *, task_type, messages, user_id=None, **kw):
+        return AIResult(text='[{"lang": "tr", "text": "masa"}]', model_used="fake")
+
+    monkeypatch.setattr(ai_router, "complete", fake_complete)
+
+    entry = await dictionary.lookup(None, "Tisch", gloss_langs=("tr", "en"))
+    langs = {m["lang"]: m["text"] for m in entry["meanings"]}
+    assert langs.get("tr") == "masa"
+    assert "en" in langs                       # English kept as fallback
+    assert entry["article"] == "der"           # curated grammar untouched
+    assert entry["source"] == "dictionary"
+    assert entry["meanings"][0]["lang"] == "tr"  # requested language first
+
+
+async def test_gloss_translation_failure_degrades_to_english(monkeypatch) -> None:
+    """Losing the translation must not lose the lookup."""
+    from app.ai import router as ai_router
+    from app.ai.tools import dictionary
+
+    async def boom(db, **kw):
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(ai_router, "complete", boom)
+
+    entry = await dictionary.lookup(None, "Tisch", gloss_langs=("tr", "en"))
+    assert any(m["lang"] == "en" for m in entry["meanings"])
+    assert entry["article"] == "der"

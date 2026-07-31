@@ -665,5 +665,98 @@ async def lookup(
     key = _normalize_lemma(lemma)
     canon = _INDEX.get(key.lower())
     if canon is not None:
-        return _from_curated(canon, gloss_langs=gloss_langs)
+        entry = _from_curated(canon, gloss_langs=gloss_langs)
+        return await _ensure_glosses(db, entry, gloss_langs=gloss_langs, user_id=user_id)
     return await _from_llm(db, key, gloss_langs=gloss_langs, user_id=user_id)
+
+
+_GLOSS_SYSTEM = """\
+You are a bilingual dictionary. Return STRICT JSON only — a list of objects, one per \
+requested language: [{"lang": "tr", "text": "..."}]. `text` is the most common \
+translation of the given German word in that language — one or two words, no prose.
+"""
+
+
+async def _ensure_glosses(
+    db: AsyncSession,
+    entry: dict[str, Any],
+    *,
+    gloss_langs: tuple[str, ...],
+    user_id: Any | None,
+) -> dict[str, Any]:
+    """Fill in requested gloss languages the curated table doesn't carry.
+
+    The ~120 curated entries are hand-verified for GRAMMAR (gender, plural, IPA)
+    but their meanings are English-only — so a Turkish learner looking up "Tisch"
+    saw "table", a word they may understand no better than the German. The gloss
+    is the one field safe to machine-translate: a slightly-off translation is
+    self-correcting in context, unlike a wrong noun gender.
+
+    Best-effort by design: any failure returns the entry unchanged (English
+    fallback beats a failed lookup). The TRANSLATE task is router-cached for 30
+    days, so each (word, language) costs one call ever.
+    """
+    have = {m["lang"] for m in entry.get("meanings", [])}
+    missing = [lang for lang in gloss_langs if lang not in have and lang != "de"]
+    if not missing:
+        return entry
+
+    english = next(
+        (m["text"] for m in entry.get("meanings", []) if m["lang"] == "en"), ""
+    )
+    try:
+        result = await ai_router.complete(
+            db,
+            task_type=TaskType.TRANSLATE,
+            messages=[
+                SystemMessage(content=_GLOSS_SYSTEM),
+                HumanMessage(
+                    content=(
+                        f"German word: {entry['lemma']}"
+                        + (f" (English: {english})" if english else "")
+                        + f"\nLanguages: {', '.join(missing)}"
+                    )
+                ),
+            ],
+            user_id=user_id,
+        )
+        raw = parse_json_object_or_list(result.text)
+        added = [
+            {"lang": str(m["lang"]).lower(), "text": str(m["text"]).strip()}
+            for m in raw
+            if isinstance(m, dict) and m.get("lang") in missing and m.get("text")
+        ]
+    except Exception as exc:
+        log.warning(
+            "dictionary_gloss_translate_failed",
+            lemma=entry.get("lemma"),
+            error=str(exc)[:150],
+        )
+        return entry
+
+    if added:
+        # Requested languages first, in the caller's order; extras after.
+        added_langs = {a["lang"] for a in added}
+        merged = added + [m for m in entry["meanings"] if m["lang"] not in added_langs]
+        order = {lang: i for i, lang in enumerate(gloss_langs)}
+        merged.sort(key=lambda m: order.get(m["lang"], 99))
+        entry = {**entry, "meanings": merged}
+    return entry
+
+
+def parse_json_object_or_list(text: str) -> list[dict[str, Any]]:
+    """Tolerant parse for the gloss reply: accepts a bare list or {"meanings": [...]}."""
+    import json
+
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        raw = raw.removeprefix("json").strip()
+    start = min((i for i in (raw.find("["), raw.find("{")) if i >= 0), default=-1)
+    if start < 0:
+        raise ValueError("no JSON found in gloss reply")
+    end = max(raw.rfind("]"), raw.rfind("}"))
+    data = json.loads(raw[start : end + 1])
+    if isinstance(data, dict):
+        data = data.get("meanings") or data.get("translations") or []
+    return data if isinstance(data, list) else []
