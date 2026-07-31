@@ -172,9 +172,11 @@ async def generate_quiz(
     # Defaults to German so every existing caller is unaffected; the tutor passes
     # the learner's actual target language through.
     target_language: str = "German",
+    native_language: str = "English",
 ) -> GeneratedQuiz:
     system_prompt = QUIZ_GENERATE_SYSTEM_PROMPT.format(
-        n=n, topic=topic, cefr_level=cefr_level, target_language=target_language
+        n=n, topic=topic, cefr_level=cefr_level,
+        target_language=target_language, native_language=native_language,
     )
     context_block = build_context_block(passages or [])
     schema_hint = (
@@ -212,9 +214,11 @@ async def evaluate_writing(
     prompt: str | None = None,
     user_id: Any | None,
     target_language: str = "German",
+    native_language: str = "English",
 ) -> WritingEvaluation:
     system_prompt = WRITING_EVALUATE_SYSTEM_PROMPT.format(
-        target_level=target_level, target_language=target_language
+        target_level=target_level,
+        target_language=target_language, native_language=native_language,
     )
     schema_hint = (
         "Return ONLY a JSON object with exactly this shape (no markdown fences, no prose):\n"

@@ -124,15 +124,17 @@ def _system_prompt(scenario: dict[str, str], cefr: str) -> str:
 _SCORE_INSTRUCTION = (
     "You are a German examiner. Score ONLY the learner's grammar and lexical accuracy "
     "in the utterance below, and list up to three corrections.\n"
-    'Return STRICT JSON only: {"grammar": 0.0-1.0, "corrections": '
-    '[{"original": "...", "suggestion": "...", "explanation": "..."}]}\n'
+    'Return STRICT JSON only: {{"grammar": 0.0-1.0, "corrections": '
+    '[{{"original": "...", "suggestion": "...", "explanation": "..."}}]}}\n'
+    "Write each correction's explanation in {native_language} — the learner reads "
+    "feedback in their own language; keep original/suggestion in German.\n"
     "Judge the transcript as spoken language: ignore missing punctuation and "
     "capitalisation, which are artefacts of transcription, not learner errors."
 )
 
 
 async def _grammar_score(
-    db: Any, *, transcript: str, cefr: str, user_id: Any
+    db: Any, *, transcript: str, cefr: str, user_id: Any, native_language: str = "English"
 ) -> tuple[float, list[dict[str, str]], AIResult | None]:
     """Structured grammar judgement. Degrades to a neutral score on failure."""
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -149,7 +151,7 @@ async def _grammar_score(
             db,
             task_type=TaskType.PRONUNCIATION_SCORE,
             messages=[
-                SystemMessage(content=_SCORE_INSTRUCTION),
+                SystemMessage(content=_SCORE_INSTRUCTION.format(native_language=native_language)),
                 HumanMessage(
                     content=(
                         f"Learner CEFR level: {cefr}\n{fenced}\n\n"
@@ -295,8 +297,14 @@ async def speaking_turn(
 
             # ── 3. Feedback ───────────────────────────────────────────────────
             yield _sse("status", {"stage": "scoring", "label": "Scoring your German…"})
+            from app.ai.languages import native_name
+
             grammar, corrections, score_result = await _grammar_score(
-                db, transcript=transcript.text, cefr=cefr, user_id=user.id
+                db,
+                transcript=transcript.text,
+                cefr=cefr,
+                user_id=user.id,
+                native_language=native_name(getattr(user, "native_language", None)),
             )
             fluency, f_notes = pron.score_fluency(
                 transcript.text, transcript.duration_s, cefr

@@ -148,6 +148,7 @@ async def generate(
     )
     passages, sources = _passages_and_sources(result)
 
+    tgt, native = _learner_languages(user)
     generated = await structured.generate_quiz(
         db,
         topic=payload.topic,
@@ -155,6 +156,8 @@ async def generate(
         n=payload.n,
         user_id=user.id,
         passages=passages or None,
+        target_language=tgt,
+        native_language=native,
     )
 
     await bump_quota(str(user.id))
@@ -228,4 +231,18 @@ async def submit(
         total=grade["total"],
         results=[QuizResultOut(**r) for r in grade["results"]],
         cefr_estimate=estimate_cefr_from_score(quiz.cefr_level, grade["score"]),
+    )
+
+
+def _learner_languages(user) -> tuple[str, str]:
+    """(target, native) as display names for the prompt.
+
+    Feedback the learner cannot read is feedback that does not exist — an A1
+    Turkish learner gets corrections explained in Turkish, not English.
+    """
+    from app.ai.languages import native_name, target
+
+    return (
+        target(getattr(user, "target_language", None)).name,
+        native_name(getattr(user, "native_language", None)),
     )

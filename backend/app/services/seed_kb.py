@@ -82,12 +82,17 @@ async def ensure_seed_corpus(db: AsyncSession) -> int:
     if not embeddings_available():
         log.warning(
             "seed_corpus_skipped",
-            reason="Set OPENROUTER_API_KEY or EMBEDDING_BACKEND=local to auto-populate the library.",
+            reason=(
+                "Set OPENROUTER_API_KEY or EMBEDDING_BACKEND=local "
+                "to auto-populate the library."
+            ),
         )
         return 0
 
     ready_count = (
-        await db.execute(select(func.count()).select_from(Document).where(Document.status == "ready"))
+        await db.execute(
+            select(func.count()).select_from(Document).where(Document.status == "ready")
+        )
     ).scalar_one()
     if ready_count >= len(SEED_DOCS):
         return 0

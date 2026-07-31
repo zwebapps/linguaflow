@@ -83,3 +83,41 @@ def test_native_and_target_overlap_is_handled() -> None:
 def test_the_native_language_list_is_not_empty_and_includes_english() -> None:
     assert "en" in NATIVE_LANGUAGES
     assert len(NATIVE_LANGUAGES) >= 10
+
+
+# ── Feedback surfaces must speak the learner's language ───────────────────────
+#
+# Found live: writing corrections, quiz explanations and speaking corrections all
+# arrived in English regardless of the learner's native language — useless to the
+# A1/A2 learners they're for.
+
+
+def test_writing_prompt_demands_native_language_explanations() -> None:
+    from app.ai.prompts import WRITING_EVALUATE_SYSTEM_PROMPT
+
+    p = WRITING_EVALUATE_SYSTEM_PROMPT.format(
+        target_level="A2", target_language="German", native_language="Turkish"
+    )
+    assert "Turkish" in p
+    assert "explanation" in p.lower()
+
+
+def test_quiz_prompt_demands_native_language_explanations() -> None:
+    from app.ai.prompts import QUIZ_GENERATE_SYSTEM_PROMPT
+
+    p = QUIZ_GENERATE_SYSTEM_PROMPT.format(
+        n=3, topic="Dativ", cefr_level="A2",
+        target_language="German", native_language="Turkish",
+    )
+    assert "Turkish" in p
+
+
+def test_speaking_score_instruction_formats_cleanly() -> None:
+    """Regression: the instruction embeds a literal JSON example, and .format()
+    treated its braces as fields → KeyError → the except path silently returned
+    the neutral (0.7, no-corrections) score for EVERY spoken turn."""
+    from app.api.v1.speaking import _SCORE_INSTRUCTION
+
+    out = _SCORE_INSTRUCTION.format(native_language="Turkish")
+    assert "Turkish" in out
+    assert '{"grammar"' in out  # the JSON example survives brace-escaping

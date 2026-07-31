@@ -87,6 +87,10 @@ For every correction give: the exact original span, the suggested replacement, a
 explanation a learner at {target_level} would understand, and a severity of \
 "error" (wrong), "warning" (unidiomatic), or "style" (improvable).
 
+Write every explanation and suggestion in **{native_language}** — the learner reads \
+feedback in their own language. Keep the corrected {target_language} spans themselves \
+in {target_language}.
+
 Then provide an improved version that keeps the learner's own voice and content — do not \
 rewrite it into a different text — plus up to three actionable suggestions.
 
@@ -102,7 +106,9 @@ Rules:
 - Mix "mcq" (4 plausible options, exactly one correct) and "cloze" (a single blank, one \
 exact expected answer) question types.
 - Distractors must be plausible errors a learner actually makes, not random words.
-- Every question needs a one-sentence explanation of why the answer is right.
+- Every question needs a one-sentence explanation of why the answer is right, written \
+in **{native_language}** (the learner's language); the question itself stays in \
+{target_language}.
 - Use real, natural {target_language}. No placeholder text.
 """
 

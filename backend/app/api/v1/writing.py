@@ -108,12 +108,17 @@ async def evaluate(
     await enforce_rate_limit(str(user.id), bucket="writing")
     await enforce_monthly_quota(str(user.id))
 
+    from app.api.v1.quiz import _learner_languages
+
+    tgt, native = _learner_languages(user)
     evaluation = await structured.evaluate_writing(
         db,
         text=payload.text,
         target_level=payload.target_level,
         prompt=payload.prompt,
         user_id=user.id,
+        target_language=tgt,
+        native_language=native,
     )
 
     await bump_quota(str(user.id))
