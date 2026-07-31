@@ -1,0 +1,143 @@
+"""Library & Reading Mode — API_CONTRACT.md §4.
+
+Mounted at `/library` (see app/api/v1/__init__.py), so paths here are relative:
+`""`, `"/{id}"`. Only admin-curated documents with `status="ready"` are ever
+visible here — a `pending`/`processing`/`failed` row is an admin-side concern,
+not something a learner should ever see or link into.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Annotated, Any, Literal
+
+from fastapi import APIRouter, Query
+from pydantic import BaseModel
+from sqlalchemy import select
+
+from app.core.deps import CurrentUser, DbSession
+from app.core.errors import NotFound, ValidationError
+from app.db.models import Document
+
+router = APIRouter()
+
+CEFR = Literal["A1", "A2", "B1", "B2", "C1"]
+
+
+# ── Schemas ────────────────────────────────────────────────────────────────────
+
+
+class LibraryItem(BaseModel):
+    id: str
+    title: str
+    source_type: str
+    cefr_level: str | None
+    skill: str | None
+    chunk_count: int
+    reading_minutes: int | None
+    created_at: Any
+
+
+class LibraryPage(BaseModel):
+    items: list[LibraryItem]
+    next_cursor: str | None = None
+
+
+class LibraryDetail(BaseModel):
+    id: str
+    title: str
+    cefr_level: str | None
+    skill: str | None
+    source_type: str
+    source_url: str | None
+    reading_minutes: int | None
+    content_md: str | None
+    chunk_count: int
+    created_at: Any
+
+
+# ── View helpers ───────────────────────────────────────────────────────────────
+
+
+def _list_view(document: Document) -> LibraryItem:
+    return LibraryItem(
+        id=str(document.id),
+        title=document.title,
+        source_type=document.source_type,
+        cefr_level=document.cefr_level,
+        skill=document.skill,
+        chunk_count=document.chunk_count,
+        reading_minutes=document.reading_minutes,
+        created_at=document.created_at,
+    )
+
+
+def _detail_view(document: Document) -> LibraryDetail:
+    return LibraryDetail(
+        id=str(document.id),
+        title=document.title,
+        cefr_level=document.cefr_level,
+        skill=document.skill,
+        source_type=document.source_type,
+        source_url=document.source_url,
+        reading_minutes=document.reading_minutes,
+        content_md=document.content_md,
+        chunk_count=document.chunk_count,
+        created_at=document.created_at,
+    )
+
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
+
+
+@router.get("")
+async def list_library(
+    user: CurrentUser,
+    db: DbSession,
+    level: Annotated[CEFR | None, Query()] = None,
+    skill: Annotated[str | None, Query(max_length=20)] = None,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: str | None = None,
+) -> LibraryPage:
+    stmt = select(Document).where(Document.status == "ready")
+    if level is not None:
+        stmt = stmt.where(Document.cefr_level == level)
+    if skill is not None:
+        stmt = stmt.where(Document.skill == skill)
+    if q:
+        stmt = stmt.where(Document.title.ilike(f"%{q}%"))
+
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError as exc:
+            raise ValidationError("Invalid cursor.") from exc
+        stmt = stmt.where(Document.created_at < cursor_dt)
+
+    stmt = stmt.order_by(Document.created_at.desc()).limit(limit + 1)
+    rows = (await db.execute(stmt)).scalars().all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    return LibraryPage(
+        items=[_list_view(d) for d in rows],
+        next_cursor=rows[-1].created_at.isoformat() if (has_more and rows) else None,
+    )
+
+
+@router.get("/{document_id}")
+async def get_library_document(
+    document_id: uuid.UUID, user: CurrentUser, db: DbSession
+) -> LibraryDetail:
+    document = (
+        await db.execute(
+            select(Document).where(Document.id == document_id, Document.status == "ready")
+        )
+    ).scalar_one_or_none()
+    if document is None:
+        # Same 404 whether the id never existed, still isn't ready, or failed —
+        # a learner has no legitimate use for any of those distinctions.
+        raise NotFound("That document isn't in the library.")
+    return _detail_view(document)

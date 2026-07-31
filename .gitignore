@@ -1,0 +1,43 @@
+# Root ignores. The per-package .gitignore files (backend/, frontend/) already
+# cover most of this; these are repeated here deliberately so a secret can't slip
+# in through a path the sub-ignores don't reach.
+
+# ── Secrets — never commit ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ── Python ────────────────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+node_modules/
+.next/
+.output/
+.turbo/
+.wrangler/
+.tanstack/
+dist/
+build/
+next-env.d.ts
+
+# ── Runtime artefacts ─────────────────────────────────────────────────────────
+# Uploaded knowledge-base files land here; they're user data, not source.
+var/
+*.log
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
