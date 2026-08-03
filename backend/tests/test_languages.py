@@ -116,9 +116,11 @@ def test_speaking_score_instruction_formats_cleanly() -> None:
     """Regression: the instruction embeds a literal JSON example, and .format()
     treated its braces as fields → KeyError → the except path silently returned
     the neutral (0.7, no-corrections) score for EVERY spoken turn."""
-    from app.api.v1.speaking import _SCORE_INSTRUCTION
+    # The instruction moved to the admin-editable prompt registry; the escaping
+    # regression it pins is unchanged.
+    from app.ai.prompt_registry import SPEAKING_GRAMMAR_SCORING
 
-    out = _SCORE_INSTRUCTION.format(native_language="Turkish")
+    out = SPEAKING_GRAMMAR_SCORING.format(native_language="Turkish")
     assert "Turkish" in out
     assert '{"grammar"' in out  # the JSON example survives brace-escaping
 

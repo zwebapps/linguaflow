@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.languages import native_name
 from app.ai.languages import target as target_language
 from app.ai.openrouter import estimate_cost, make_llm
-from app.ai.prompts import TUTOR_SYSTEM_PROMPT, build_context_block, looks_like_injection
+from app.ai.prompts import build_context_block, looks_like_injection
 from app.ai.router import AIResult, load_policy, record_usage
 from app.ai.tasks import TaskType
 from app.db.models import Message, Thread, User
@@ -212,7 +212,9 @@ async def stream_tutor_turn(
     # The learner's own languages are DATA, not an assumption baked into the
     # prompt. Before this, the prompt said "explain in the learner's language"
     # without ever naming it, so every learner got English.
-    system_prompt = TUTOR_SYSTEM_PROMPT.format(
+    from app.ai.prompt_registry import resolve as resolve_prompt
+
+    system_prompt = (await resolve_prompt(db, "tutor_system")).format(
         cefr_level=cefr,
         native_language=native_name(getattr(user, "native_language", None)),
         target_language=target_language(getattr(user, "target_language", None)).name,

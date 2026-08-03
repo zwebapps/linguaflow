@@ -46,21 +46,8 @@ MAX_ITEMS = 10
 TEXT_WORDS = "60-110"
 MAX_TOPIC_CHARS = 120
 
-_PACK_PROMPT = """You author graded {target_language} learning material.
-Create a learning pack on the topic "{topic}" for a CEFR {cefr} learner.
-
-Return ONLY a JSON object, no markdown fences, with exactly this shape:
-{{
-  "title": "short {target_language} title for the pack",
-  "vocabulary": [{{"word": "...", "gloss_en": "...", "example": "one {cefr}-level sentence using it"}}],
-  "grammar_sentences": [{{"sentence": "...", "note_en": "what it demonstrates, one short clause"}}],
-  "articles": [{{"title": "...", "text": "{text_words} words, factual tone, {cefr} level"}}],
-  "stories": [{{"title": "...", "text": "{text_words} words, narrative tone, {cefr} level"}}]
-}}
-
-Counts: {min_items}-{max_items} vocabulary items, {min_items}-{max_items} grammar sentences,
-{min_items} articles and {min_items} stories. Everything in {target_language} except the
-_en fields. All language STRICTLY at {cefr} level."""
+# The pack-author prompt lives in app.ai.prompt_registry ("gapfill_pack") so
+# the admin can tune it at runtime; this module resolves it per call.
 
 
 @dataclass(slots=True)
@@ -181,7 +168,9 @@ async def fill_content_gap(
 
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    prompt = _PACK_PROMPT.format(
+    from app.ai.prompt_registry import resolve as resolve_prompt
+
+    prompt = (await resolve_prompt(db, "gapfill_pack")).format(
         topic=clean_topic,
         cefr=cefr,
         target_language=target_language_name,

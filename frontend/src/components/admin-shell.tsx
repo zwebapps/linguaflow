@@ -1,5 +1,5 @@
 import { Link, usePathname } from "@/components/router-link";
-import { Activity, BookOpen, Brain, Database, FlaskConical, Rss } from "lucide-react";
+import { Activity, BookOpen, Brain, Database, FlaskConical, Rss, ScrollText } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAuthStore } from "@/lib/auth-store";
 import { LinguaFlowLogo } from "@/components/linguaflow-logo";
@@ -11,6 +11,7 @@ const adminNav = [
   { to: "/admin/knowledge-base", label: "Knowledge base", icon: Database },
   { to: "/admin/library", label: "Library", icon: BookOpen },
   { to: "/admin/models", label: "AI routes", icon: Brain },
+  { to: "/admin/prompts", label: "Prompts", icon: ScrollText },
   { to: "/admin/feeds", label: "RSS feeds", icon: Rss },
   { to: "/admin/experiments", label: "A/B experiments", icon: FlaskConical },
   { to: "/admin/usage", label: "Usage & cost", icon: Activity },

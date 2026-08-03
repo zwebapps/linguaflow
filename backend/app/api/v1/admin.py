@@ -717,3 +717,105 @@ async def experiment_results(
             else f"Only {len(rows)} events recorded — too few to call a winner (need 30+)."
         ),
     )
+
+
+# ── Prompt management ─────────────────────────────────────────────────────────
+# The AI's editable voice: DB overrides over the code defaults, validated so a
+# broken template can never reach a learner. See app.ai.prompt_registry.
+
+
+class PromptOut(BaseModel):
+    key: str
+    title: str
+    description: str
+    placeholders: list[str]
+    default: str
+    override: str | None
+    active_source: str  # "default" | "override"
+    updated_at: str | None
+
+
+class PromptUpdateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=8000)
+
+
+@router.get("/prompts")
+async def list_prompts(db: DbSession, admin: CurrentAdmin) -> list[PromptOut]:
+    from app.ai import prompt_registry as reg
+    from app.db.models import PromptOverride
+
+    rows = {
+        r.key: r
+        for r in (await db.execute(select(PromptOverride))).scalars()
+        if r.key in reg.REGISTRY
+    }
+    return [
+        PromptOut(
+            key=spec.key,
+            title=spec.title,
+            description=spec.description,
+            placeholders=sorted(spec.placeholders),
+            default=spec.default,
+            override=rows[spec.key].content if spec.key in rows else None,
+            active_source="override" if spec.key in rows else "default",
+            updated_at=(
+                rows[spec.key].updated_at.isoformat() if spec.key in rows else None
+            ),
+        )
+        for spec in reg.REGISTRY.values()
+    ]
+
+
+@router.put("/prompts/{key}")
+async def update_prompt(
+    key: str, payload: PromptUpdateRequest, db: DbSession, admin: CurrentAdmin
+) -> PromptOut:
+    from app.ai import prompt_registry as reg
+    from app.db.models import PromptOverride
+
+    spec = reg.REGISTRY.get(key)
+    if spec is None:
+        raise NotFound(f"No editable prompt named '{key}'.")
+    content = payload.content.strip()
+    reg.validate_override(spec, content)
+
+    row = (
+        await db.execute(select(PromptOverride).where(PromptOverride.key == key))
+    ).scalar_one_or_none()
+    if row is None:
+        row = PromptOverride(key=key, content=content, updated_by=admin.id)
+        db.add(row)
+    else:
+        row.content = content
+        row.updated_by = admin.id
+    await db.commit()
+    await db.refresh(row)
+    log.info("prompt_override_saved", key=key, admin_id=str(admin.id))
+    return PromptOut(
+        key=spec.key,
+        title=spec.title,
+        description=spec.description,
+        placeholders=sorted(spec.placeholders),
+        default=spec.default,
+        override=row.content,
+        active_source="override",
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
+    )
+
+
+@router.delete("/prompts/{key}", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_prompt(key: str, db: DbSession, admin: CurrentAdmin) -> Response:
+    """Deleting the override IS the reset — the code default takes over."""
+    from app.ai import prompt_registry as reg
+    from app.db.models import PromptOverride
+
+    if key not in reg.REGISTRY:
+        raise NotFound(f"No editable prompt named '{key}'.")
+    row = (
+        await db.execute(select(PromptOverride).where(PromptOverride.key == key))
+    ).scalar_one_or_none()
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
+        log.info("prompt_override_reset", key=key, admin_id=str(admin.id))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

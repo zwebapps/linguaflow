@@ -110,6 +110,22 @@ class User(Base, TimestampMixin):
         return self.role == "admin"
 
 
+class PromptOverride(Base, TimestampMixin):
+    """Admin-customised AI prompt text; the code constant remains the default.
+
+    Deleting a row IS the reset-to-default operation, hence no soft delete.
+    """
+
+    __tablename__ = "prompt_overrides"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    key: Mapped[str] = mapped_column(String(60), unique=True, nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
 # ── Knowledge base (admin-curated) ────────────────────────────────────────────
 
 

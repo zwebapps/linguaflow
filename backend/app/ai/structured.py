@@ -20,11 +20,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import router as ai_router
-from app.ai.prompts import (
-    QUIZ_GENERATE_SYSTEM_PROMPT,
-    WRITING_EVALUATE_SYSTEM_PROMPT,
-    build_context_block,
-)
+from app.ai.prompts import build_context_block
 from app.ai.tasks import TaskType
 from app.core.errors import UpstreamError
 
@@ -174,7 +170,9 @@ async def generate_quiz(
     target_language: str = "German",
     native_language: str = "English",
 ) -> GeneratedQuiz:
-    system_prompt = QUIZ_GENERATE_SYSTEM_PROMPT.format(
+    from app.ai.prompt_registry import resolve as resolve_prompt
+
+    system_prompt = (await resolve_prompt(db, "quiz_generate")).format(
         n=n, topic=topic, cefr_level=cefr_level,
         target_language=target_language, native_language=native_language,
     )
@@ -216,7 +214,9 @@ async def evaluate_writing(
     target_language: str = "German",
     native_language: str = "English",
 ) -> WritingEvaluation:
-    system_prompt = WRITING_EVALUATE_SYSTEM_PROMPT.format(
+    from app.ai.prompt_registry import resolve as resolve_prompt
+
+    system_prompt = (await resolve_prompt(db, "writing_evaluate")).format(
         target_level=target_level,
         target_language=target_language, native_language=native_language,
     )
