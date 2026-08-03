@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -31,6 +31,17 @@ SEED_DOCS: tuple[SeedDoc, ...] = (
     SeedDoc("praesens.md", "Das Präsens", "A1", "grammar"),
     SeedDoc("akkusativ_praepositionen.md", "Präpositionen mit Akkusativ", "A2", "grammar"),
     SeedDoc("ein_tag_im_park.md", "Ein Tag im Park", "A1", "reading"),
+    # Graded reading corpus — every level gets stories so the Reader's picker
+    # has something to offer at the learner's own level. Each file carries a
+    # `## Glossar` section the Reader parses into level-correct vocab cards.
+    SeedDoc("im_supermarkt.md", "Im Supermarkt", "A1", "reading"),
+    SeedDoc("meine_familie.md", "Meine Familie", "A1", "reading"),
+    SeedDoc("die_reise_nach_berlin.md", "Die Reise nach Berlin", "A2", "reading"),
+    SeedDoc("beim_arzt.md", "Beim Arzt", "A2", "reading"),
+    SeedDoc("das_vorstellungsgespraech.md", "Das Vorstellungsgespräch", "B1", "reading"),
+    SeedDoc("der_umzug.md", "Der Umzug", "B1", "reading"),
+    SeedDoc("die_stadt_der_zukunft.md", "Die Stadt der Zukunft", "B2", "reading"),
+    SeedDoc("die_kunst_des_zuhoerens.md", "Die Kunst des Zuhörens", "C1", "reading"),
 )
 
 
@@ -95,12 +106,17 @@ async def ensure_seed_corpus(db: AsyncSession) -> int:
         )
         return 0
 
-    ready_count = (
-        await db.execute(
-            select(func.count()).select_from(Document).where(Document.status == "ready")
-        )
-    ).scalar_one()
-    if ready_count >= len(SEED_DOCS):
+    # Compare against the SEED titles, not a bare ready-count: user uploads
+    # inflate the count, which used to stop newly added seed files from ever
+    # being ingested on an existing install.
+    seeded_titles = set(
+        (
+            await db.execute(
+                select(Document.title).where(Document.title.in_([s.title for s in SEED_DOCS]))
+            )
+        ).scalars()
+    )
+    if all(s.title in seeded_titles for s in SEED_DOCS):
         return 0
 
     added = 0

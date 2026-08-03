@@ -41,3 +41,14 @@ Auf dem Rückweg denkt sie: "Das war ein wirklich schöner Tag." Zu Hause
 kocht sie sich Tee und schreibt ein paar Sätze in ihr Tagebuch: "Heute war
 ich im Park. Das Wetter war gut, und ich habe einen netten Hund getroffen."
 Dann geht sie früh schlafen, weil sie morgen wieder arbeiten muss.
+
+## Glossar
+
+- **aufwachen** — to wake up
+- **beschließen** — to decide
+- **die Wasserflasche** — water bottle
+- **der Nachbar** — neighbour
+- **streicheln** — to stroke, to pet
+- **neugierig** — curious
+- **der Rückweg** — way back
+- **das Tagebuch** — diary

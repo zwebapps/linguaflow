@@ -17,7 +17,14 @@ import { useQuery } from "@tanstack/react-query";
 import { readerText } from "@/data/deutschflow";
 import { apiFetch } from "@/lib/api";
 import type { LibraryDocument, LibraryItem, Paginated, User } from "@/lib/types";
-import { splitReaderParagraphs } from "@/lib/reader-content";
+import { extractGlossary, splitReaderParagraphs, type GlossaryEntry } from "@/lib/reader-content";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ReaderDisplaySettings } from "@/components/reader/reader-display-settings";
 import { ReaderArticlePage } from "@/components/reader/reader-article-page";
 import { useReaderFontSize, useReaderThemeState } from "@/hooks/use-reader-theme-state";
@@ -64,23 +71,61 @@ function AmbiencePanel({
   );
 }
 
-function GlossaryPanel() {
+function GlossaryPanel({ entries }: { entries: GlossaryEntry[] }) {
   return (
     <div className="panel rounded-lg p-4">
       <p className="label-mono mb-3">Glossary</p>
-      <ul className="space-y-2.5">
-        {readerText.glossary.map((g) => (
-          <li key={g.term} className="text-sm">
-            <div className="flex items-center gap-2">
-              <span className="text-signal">{g.term}</span>
-              <Badge variant="secondary" className="text-[10px]">
-                {g.level}
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">{g.gloss}</p>
-          </li>
-        ))}
-      </ul>
+      {entries.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          No glossary for this text yet — tap a word in library mode to look it up.
+        </p>
+      ) : (
+        <ul className="space-y-2.5">
+          {entries.map((g) => (
+            <li key={g.term} className="text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-signal">{g.term}</span>
+                <Badge variant="secondary" className="text-[10px]">
+                  {g.level}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">{g.gloss}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function StoryPicker({
+  items,
+  value,
+  onChange,
+  myLevel,
+}: {
+  items: LibraryItem[];
+  value: string | null;
+  onChange: (id: string) => void;
+  myLevel?: string;
+}) {
+  if (items.length < 2) return null;
+  return (
+    <div className="panel rounded-lg p-4">
+      <p className="label-mono mb-2">Story</p>
+      <Select value={value ?? undefined} onValueChange={onChange}>
+        <SelectTrigger>
+          <SelectValue placeholder="Choose a text" />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((item) => (
+            <SelectItem key={item.id} value={item.id}>
+              {item.title}
+              {item.cefr_level !== myLevel ? ` · ${item.cefr_level}` : ""}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
@@ -101,25 +146,30 @@ function useReaderDocument() {
     queryFn: () => apiFetch<User>("/me"),
   });
   const level = me.data?.cefr_level;
+  const [pickedId, setPickedId] = useState<string | null>(null);
 
   const atMyLevel = useQuery({
-    queryKey: ["reader-doc", level],
+    queryKey: ["reader-docs", level],
     enabled: !!level,
-    queryFn: () => apiFetch<Paginated<LibraryItem>>(`/library?level=${level}&limit=1`),
+    queryFn: () => apiFetch<Paginated<LibraryItem>>(`/library?level=${level}&limit=50`),
   });
   // Nothing graded at the learner's exact level: any document in their target
   // language beats falling back to demo content in the wrong language.
   const anyLevel = useQuery({
-    queryKey: ["reader-doc-any"],
+    queryKey: ["reader-docs-any"],
     enabled: atMyLevel.isSuccess && atMyLevel.data.items.length === 0,
-    queryFn: () => apiFetch<Paginated<LibraryItem>>(`/library?limit=1`),
+    queryFn: () => apiFetch<Paginated<LibraryItem>>(`/library?limit=50`),
   });
 
-  const chosen = atMyLevel.data?.items[0] ?? anyLevel.data?.items[0] ?? null;
+  const items = (atMyLevel.data?.items.length ? atMyLevel.data.items : anyLevel.data?.items) ?? [];
+  const chosen = items.find((d) => d.id === pickedId) ?? items[0] ?? null;
   const detail = useQuery({
     queryKey: ["reader-doc-detail", chosen?.id],
     enabled: !!chosen,
     queryFn: () => apiFetch<LibraryDocument>(`/library/${chosen!.id}`),
+    // Keep the current story on screen while the newly picked one loads —
+    // otherwise every switch flashes the demo fallback for a beat.
+    placeholderData: (prev) => prev,
   });
 
   const settled =
@@ -129,11 +179,20 @@ function useReaderDocument() {
     detail.isError;
 
   if (detail.data?.content_md) {
+    const { body, glossary } = extractGlossary(detail.data.content_md, detail.data.cefr_level);
+    // The markdown's own `# Title` line would otherwise repeat under the
+    // rendered page title as the first paragraph.
+    const paragraphs = splitReaderParagraphs(body);
+    if (paragraphs[0] === detail.data.title) paragraphs.shift();
     return {
+      items,
+      myLevel: level,
+      pick: setPickedId,
       docId: chosen!.id,
       title: detail.data.title,
       level: detail.data.cefr_level,
-      paragraphs: splitReaderParagraphs(detail.data.content_md),
+      paragraphs,
+      glossary,
       isDemo: false,
       settled: true,
     };
@@ -141,10 +200,14 @@ function useReaderDocument() {
   // Demo fallback — only once the queries have actually settled, so the page
   // does not flash B2 demo content at someone whose real text is still loading.
   return {
+    items,
+    myLevel: level,
+    pick: setPickedId,
     docId: null,
     title: readerText.title,
     level: readerText.level,
     paragraphs: readerText.paragraphs,
+    glossary: readerText.glossary,
     isDemo: true,
     settled,
   };
@@ -197,8 +260,9 @@ export default function ReaderPage() {
             size={size}
             onSizeChange={setSize}
           />
+          <StoryPicker items={doc.items} value={doc.docId} onChange={doc.pick} myLevel={doc.myLevel} />
           <AmbiencePanel sound={sound} setSound={setSound} playing={playing} setPlaying={setPlaying} />
-          <GlossaryPanel />
+          <GlossaryPanel entries={doc.glossary} />
         </aside>
 
         <div className="lg:col-start-2">
@@ -234,8 +298,9 @@ export default function ReaderPage() {
             <ChevronDown className="size-4 text-muted-foreground" />
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-4 border-t border-border px-4 pb-4 pt-3">
+            <StoryPicker items={doc.items} value={doc.docId} onChange={doc.pick} myLevel={doc.myLevel} />
             <AmbiencePanel sound={sound} setSound={setSound} playing={playing} setPlaying={setPlaying} />
-            <GlossaryPanel />
+            <GlossaryPanel entries={doc.glossary} />
           </CollapsibleContent>
         </Collapsible>
       </div>
