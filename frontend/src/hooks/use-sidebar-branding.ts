@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
+
+import { useStoredState } from "@/hooks/use-stored-state";
 
 export const SIDEBAR_BRANDING_STORAGE_KEY = "df-sidebar-branding-expanded";
 export const SIDEBAR_BRANDING_CHANGE_EVENT = "df-sidebar-branding-change";
@@ -15,7 +17,9 @@ export function setSidebarBrandingExpanded(expanded: boolean) {
 }
 
 export function useSidebarBrandingExpanded() {
-  const [expanded, setExpanded] = useState(() => getSidebarBrandingExpanded());
+  // Hydration-safe: false on both server and first client paint, then the
+  // stored preference — see use-stored-state.ts for why.
+  const [expanded, setExpanded] = useStoredState(getSidebarBrandingExpanded, false);
 
   useEffect(() => {
     const onChange = (e: Event) => {

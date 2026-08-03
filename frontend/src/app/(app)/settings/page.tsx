@@ -28,16 +28,21 @@ import {
   type ReaderThemeId,
 } from "@/lib/reader-themes";
 import { useState } from "react";
+import { useStoredState } from "@/hooks/use-stored-state";
+import { useReaderFontSize } from "@/hooks/use-reader-theme-state";
 import { Switch } from "@/components/ui/switch";
 import { useSidebarBrandingExpanded } from "@/hooks/use-sidebar-branding";
 
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
-  const [readerTheme, setReaderTheme] = useState<ReaderThemeId>(() => getStoredReaderTheme());
-  const [readerSize, setReaderSize] = useState(() =>
-    Number(typeof localStorage !== "undefined" ? localStorage.getItem(READER_FONT_SIZE_KEY) ?? "19" : "19"),
+  // Hydration-safe: default first, stored preference after mount — a
+  // localStorage-reading initializer mismatches the server-rendered HTML.
+  const [readerTheme, setReaderTheme] = useStoredState<ReaderThemeId>(
+    getStoredReaderTheme,
+    "reader-sepia",
   );
+  const [readerSize, setReaderSize] = useReaderFontSize();
   const { expanded: sidebarBranding, setExpanded: setSidebarBranding } = useSidebarBrandingExpanded();
 
   const save = useMutation({

@@ -15,14 +15,12 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { splitReaderParagraphs } from "@/lib/reader-content";
 import type { AdminDocument, LibraryDocument, Paginated } from "@/lib/types";
 import { useMemo, useState } from "react";
-import { READER_FONT_SIZE_KEY } from "@/lib/reader-themes";
+import { useReaderFontSize } from "@/hooks/use-reader-theme-state";
 
 export default function AdminLibraryPreviewPage() {
   const { id } = useParams() as { id: string };
   const [theme] = useReaderThemeState();
-  const [size] = useState(() =>
-    Number(typeof localStorage !== "undefined" ? localStorage.getItem(READER_FONT_SIZE_KEY) ?? "19" : "19"),
-  );
+  const [size] = useReaderFontSize();
 
   const meta = useQuery({
     queryKey: ["admin-documents", "library"],

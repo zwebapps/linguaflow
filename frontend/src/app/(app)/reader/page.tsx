@@ -20,7 +20,7 @@ import type { LibraryDocument, LibraryItem, Paginated, User } from "@/lib/types"
 import { splitReaderParagraphs } from "@/lib/reader-content";
 import { ReaderDisplaySettings } from "@/components/reader/reader-display-settings";
 import { ReaderArticlePage } from "@/components/reader/reader-article-page";
-import { useReaderThemeState } from "@/hooks/use-reader-theme-state";
+import { useReaderFontSize, useReaderThemeState } from "@/hooks/use-reader-theme-state";
 import { countWords, readingMinutes } from "@/lib/reader-content";
 import { READER_FONT_SIZE_KEY } from "@/lib/reader-themes";
 
@@ -152,9 +152,7 @@ function useReaderDocument() {
 
 export default function ReaderPage() {
   const [theme, setTheme] = useReaderThemeState();
-  const [size, setSize] = useState(() =>
-    Number(typeof localStorage !== "undefined" ? localStorage.getItem(READER_FONT_SIZE_KEY) ?? "19" : "19"),
-  );
+  const [size, setSize] = useReaderFontSize();
   const [sound, setSound] = useState("Rain on glass");
   const [playing, setPlaying] = useState(false);
 

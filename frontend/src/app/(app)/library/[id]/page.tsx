@@ -16,16 +16,14 @@ import { apiFetch } from "@/lib/api";
 import type { LibraryDocument, LookupWordResult } from "@/lib/types";
 import { ReaderDisplaySettings } from "@/components/reader/reader-display-settings";
 import { ReaderArticlePage } from "@/components/reader/reader-article-page";
-import { useReaderThemeState } from "@/hooks/use-reader-theme-state";
+import { useReaderFontSize, useReaderThemeState } from "@/hooks/use-reader-theme-state";
 import { splitReaderParagraphs } from "@/lib/reader-content";
 import { READER_FONT_SIZE_KEY } from "@/lib/reader-themes";
 
 export default function LibraryReaderPage() {
   const { id } = useParams() as { id: string };
   const [theme, setTheme] = useReaderThemeState();
-  const [size, setSize] = useState(() =>
-    Number(typeof localStorage !== "undefined" ? localStorage.getItem(READER_FONT_SIZE_KEY) ?? "19" : "19"),
-  );
+  const [size, setSize] = useReaderFontSize();
   const [lookup, setLookup] = useState<{ word: string; data?: LookupWordResult; loading: boolean } | null>(
     null,
   );

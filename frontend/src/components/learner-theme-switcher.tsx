@@ -1,3 +1,4 @@
+import { useStoredState } from "@/hooks/use-stored-state";
 import { useState } from "react";
 import { Check } from "lucide-react";
 import {
@@ -10,7 +11,8 @@ import { cn } from "@/lib/utils";
 
 /** Sidebar appearance control — sits above the signed-in user block. */
 export function LearnerThemeSwitcher() {
-  const [theme, setTheme] = useState<AppThemeId>(() => getStoredAppTheme());
+  // Hydration-safe: see use-stored-state.ts.
+  const [theme, setTheme] = useStoredState<AppThemeId>(getStoredAppTheme, "classroom");
 
   return (
     <div className="border-t border-sidebar-border px-4 py-3">
