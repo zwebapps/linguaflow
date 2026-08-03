@@ -108,7 +108,9 @@ export function AdminLibraryGrid({ items }: { items: AdminDocument[] }) {
               className="flex flex-col rounded-lg border border-border bg-card p-4 transition-shadow hover:shadow-md"
             >
               <div className="flex items-start justify-between gap-2">
-                <h2 className="font-display text-sm font-semibold leading-snug">{item.title}</h2>
+                <h2 className="min-w-0 break-all font-display text-sm font-semibold leading-snug [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden" title={item.title}>
+                  {item.title}
+                </h2>
                 {item.cefr_level ? <CefrBadge level={item.cefr_level} /> : null}
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2">

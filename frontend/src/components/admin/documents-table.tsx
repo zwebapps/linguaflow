@@ -71,8 +71,13 @@ export function DocumentsTable({ items }: { items: AdminDocument[] }) {
         {items.map((d) => (
           <TableRow key={d.id}>
             <TableCell>
-              <div>
-                <p className="font-medium">{d.title}</p>
+              <div className="min-w-0">
+                {/* Link-created documents use the URL as their title, so this
+                    is routinely a 1000px+ unbreakable string — the cell that
+                    blew the whole table past the viewport. */}
+                <p className="max-w-md truncate font-medium" title={d.title}>
+                  {d.title}
+                </p>
                 {d.source_url && (
                   <p className="max-w-xs truncate font-mono text-[10px] text-muted-foreground">{d.source_url}</p>
                 )}

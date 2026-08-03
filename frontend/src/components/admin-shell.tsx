@@ -31,7 +31,10 @@ export function AdminShell({
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
-      <aside className="flex h-full w-56 shrink-0 flex-col border-r border-border bg-card">
+      {/* Desktop-only: at phone widths this fixed 224px column left ~150px
+          for content — "cards under the sidebar". Mobile gets the pill strip
+          below instead, same pattern as the learner AppShell. */}
+      <aside className="hidden h-full w-56 shrink-0 flex-col border-r border-border bg-card md:flex">
         <div className="border-b border-border px-4 py-5">
           <LinguaFlowLogo variant="sidebar" to="/admin/knowledge-base" />
           <p className="mt-2 font-mono text-[10px] text-muted-foreground">LinguaFlow · ops console</p>
@@ -71,10 +74,22 @@ export function AdminShell({
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <header className="border-b border-border bg-background px-8 py-5">
+        <header className="border-b border-border bg-background px-5 py-5 md:px-8">
           <h1 className="font-display text-xl font-semibold">{title}</h1>
           <p className="text-sm text-muted-foreground">{subtitle}</p>
         </header>
+        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/30 px-3 py-2 md:hidden">
+          {adminNav.map((item) => (
+            <Link
+              key={item.to}
+              to={item.to}
+              className="whitespace-nowrap rounded-full px-3 py-1.5 text-xs text-muted-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground"
+              data-active={pathname.startsWith(item.to) || undefined}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
         <main className="flex-1 bg-background p-8">{children}</main>
       </div>
     </div>
