@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60 * 24 * 7
 
+    # Seed the starter corpus on boot even outside local/ci. Off by default so
+    # a real production instance never surprises anyone with demo content; a
+    # portfolio deployment sets it to start with a full library.
+    SEED_ON_BOOT: bool = False
+
     # Where verification links and OAuth round-trips send the browser.
     PUBLIC_APP_URL: str = "http://localhost:3010"
     # Email delivery. "console" logs the message and writes it to var/outbox/

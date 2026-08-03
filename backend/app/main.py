@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             log.error("seed_corpus_failed", error=str(exc))
 
-    if settings.is_local:
+    if settings.is_local or settings.SEED_ON_BOOT:
         asyncio.create_task(_seed_library_background())
 
     yield

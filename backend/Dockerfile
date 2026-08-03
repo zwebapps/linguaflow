@@ -18,8 +18,18 @@ RUN pip install --upgrade pip && pip install -e .
 COPY app ./app
 COPY scripts ./scripts
 COPY seed ./seed
+# Startup runs `alembic upgrade head` (app/services/bootstrap.py) — it needs
+# the migration scripts and config INSIDE the image or first boot dies.
+COPY migrations ./migrations
+COPY alembic.ini ./
+COPY deploy/start.sh ./deploy/start.sh
 
-RUN useradd -m -u 10001 appuser && chown -R appuser:appuser /app
+# Uploads / generated packs / dev email outbox. EPHEMERAL on free tiers:
+# ingested content survives (rows + chunks + vectors live in Postgres/Qdrant)
+# but re-ingest of an old upload needs the original file again.
+RUN chmod +x deploy/start.sh \
+    && mkdir -p var/uploads var/outbox \
+    && useradd -m -u 10001 appuser && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
@@ -27,5 +37,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD curl -fsS http://localhost:8000/healthz || exit 1
 
-# Render injects $PORT.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# start.sh = uvicorn + the ingestion worker in one container (free tiers give
+# you a single process; without the worker every upload sits "pending" forever).
+CMD ["./deploy/start.sh"]

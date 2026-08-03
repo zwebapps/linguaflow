@@ -94,7 +94,7 @@ async def seed_one_document(db: AsyncSession, spec: SeedDoc) -> bool:
 
 async def ensure_seed_corpus(db: AsyncSession) -> int:
     """Ensure shipped seed documents exist (local/ci). Returns count newly ingested."""
-    if not settings.is_local:
+    if not (settings.is_local or settings.SEED_ON_BOOT):
         return 0
     if not embeddings_available():
         log.warning(
