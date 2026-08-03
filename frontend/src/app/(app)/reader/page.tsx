@@ -13,8 +13,11 @@ import { AudioLines, Pause, Play } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useQuery } from "@tanstack/react-query";
 import { readerText } from "@/data/deutschflow";
-import { libraryDocId } from "@/mocks/mock-db";
+import { apiFetch } from "@/lib/api";
+import type { LibraryDocument, LibraryItem, Paginated, User } from "@/lib/types";
+import { splitReaderParagraphs } from "@/lib/reader-content";
 import { ReaderDisplaySettings } from "@/components/reader/reader-display-settings";
 import { ReaderArticlePage } from "@/components/reader/reader-article-page";
 import { useReaderThemeState } from "@/hooks/use-reader-theme-state";
@@ -82,6 +85,71 @@ function GlossaryPanel() {
   );
 }
 
+/**
+ * Pick the story to read: a real library document AT THE LEARNER'S LEVEL.
+ *
+ * The page used to render a hardcoded demo story labelled "Niveau B2" for
+ * everyone — an A1 learner saw a B2 badge that had nothing to do with them or
+ * with anything in their course. The badge names the TEXT's level (that is how
+ * graded readers work), so the fix is to load a text that matches the learner:
+ * their level first, any level in their language second, and the bundled demo
+ * story only when the library is empty (fresh install, no corpus yet).
+ */
+function useReaderDocument() {
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: () => apiFetch<User>("/me"),
+  });
+  const level = me.data?.cefr_level;
+
+  const atMyLevel = useQuery({
+    queryKey: ["reader-doc", level],
+    enabled: !!level,
+    queryFn: () => apiFetch<Paginated<LibraryItem>>(`/library?level=${level}&limit=1`),
+  });
+  // Nothing graded at the learner's exact level: any document in their target
+  // language beats falling back to demo content in the wrong language.
+  const anyLevel = useQuery({
+    queryKey: ["reader-doc-any"],
+    enabled: atMyLevel.isSuccess && atMyLevel.data.items.length === 0,
+    queryFn: () => apiFetch<Paginated<LibraryItem>>(`/library?limit=1`),
+  });
+
+  const chosen = atMyLevel.data?.items[0] ?? anyLevel.data?.items[0] ?? null;
+  const detail = useQuery({
+    queryKey: ["reader-doc-detail", chosen?.id],
+    enabled: !!chosen,
+    queryFn: () => apiFetch<LibraryDocument>(`/library/${chosen!.id}`),
+  });
+
+  const settled =
+    me.isError ||
+    (atMyLevel.isSuccess && atMyLevel.data.items.length === 0 && anyLevel.isSuccess) ||
+    detail.isSuccess ||
+    detail.isError;
+
+  if (detail.data?.content_md) {
+    return {
+      docId: chosen!.id,
+      title: detail.data.title,
+      level: detail.data.cefr_level,
+      paragraphs: splitReaderParagraphs(detail.data.content_md),
+      isDemo: false,
+      settled: true,
+    };
+  }
+  // Demo fallback — only once the queries have actually settled, so the page
+  // does not flash B2 demo content at someone whose real text is still loading.
+  return {
+    docId: null,
+    title: readerText.title,
+    level: readerText.level,
+    paragraphs: readerText.paragraphs,
+    isDemo: true,
+    settled,
+  };
+}
+
 export default function ReaderPage() {
   const [theme, setTheme] = useReaderThemeState();
   const [size, setSize] = useState(() =>
@@ -90,7 +158,8 @@ export default function ReaderPage() {
   const [sound, setSound] = useState("Rain on glass");
   const [playing, setPlaying] = useState(false);
 
-  const wordCount = countWords(readerText.paragraphs.join(" "));
+  const doc = useReaderDocument();
+  const wordCount = countWords(doc.paragraphs.join(" "));
   const minutes = readingMinutes(wordCount);
 
   return (
@@ -100,13 +169,16 @@ export default function ReaderPage() {
       actions={
         <div className="flex gap-2">
           <Badge variant="outline" className="border-data/40 text-data">
-            Niveau {readerText.level}
+            Niveau {doc.level}
+            {doc.isDemo && doc.settled ? " · Beispieltext" : ""}
           </Badge>
-          <Button asChild variant="secondary" size="sm">
-            <Link to="/library/$id" params={{ id: libraryDocId }}>
-              API-backed text
-            </Link>
-          </Button>
+          {doc.docId ? (
+            <Button asChild variant="secondary" size="sm">
+              <Link to="/library/$id" params={{ id: doc.docId }}>
+                Open in library
+              </Link>
+            </Button>
+          ) : null}
         </div>
       }
     >
@@ -135,15 +207,24 @@ export default function ReaderPage() {
           <ReaderArticlePage
             theme={theme}
             fontSizePx={size}
-            title={readerText.title}
-            level={readerText.level}
-            paragraphs={readerText.paragraphs}
+            title={doc.title}
+            level={doc.level}
+            paragraphs={doc.paragraphs}
             footer={
               <>
-                {wordCount} Wörter · ca. {minutes} Min. Lesezeit · tap-a-word in{" "}
-                <Link to="/library/$id" params={{ id: libraryDocId }} className="underline underline-offset-2">
-                  library mode
-                </Link>
+                {wordCount} Wörter · ca. {minutes} Min. Lesezeit
+                {doc.docId ? (
+                  <>
+                    {" "}· tap-a-word in{" "}
+                    <Link
+                      to="/library/$id"
+                      params={{ id: doc.docId }}
+                      className="underline underline-offset-2"
+                    >
+                      library mode
+                    </Link>
+                  </>
+                ) : null}
               </>
             }
           />
