@@ -53,6 +53,10 @@ class SearchKnowledgeBaseArgs(BaseModel):
     skill: str | None = Field(None, max_length=30)
 
 
+class ExpandKnowledgeBaseArgs(BaseModel):
+    topic: str = Field(..., min_length=3, max_length=120)
+
+
 class LookupWordArgs(BaseModel):
     lemma: str = Field(..., pattern=_LEMMA_PATTERN)
 
@@ -123,6 +127,43 @@ def build_tools(db: AsyncSession, user: User) -> list[BaseTool]:
             "query": result.query,
             "strategy": result.strategy,
             "results": [c.as_source() for c in result.results],
+        }
+
+    async def _expand_knowledge_base(topic: str) -> dict[str, Any] | str:
+        from app.services.kb_gapfill import fill_content_gap
+
+        try:
+            from app.ai.languages import target
+
+            result = await fill_content_gap(
+                db,
+                topic=topic,
+                cefr=user.cefr_level or "A1",
+                language=user.target_language,
+                user_id=user.id,
+                target_language_name=target(user.target_language).name,
+            )
+        except Exception as exc:
+            log.warning("tool_expand_kb_failed", topic=topic, error=str(exc))
+            return (
+                "Couldn't add new material right now "
+                f"({getattr(exc, 'message', None) or 'generation failed'}). "
+                "Answer from general knowledge and say so."
+            )
+        if not result.created:
+            return {
+                "status": "already_covered",
+                "document_title": result.title,
+                "hint": "Material for this topic already exists — search for it again.",
+            }
+        return {
+            "status": "added",
+            "document_title": result.title,
+            "counts": result.counts,
+            "hint": (
+                "New material was added to the library. Tell the learner, and "
+                "search the knowledge base again to ground your answer in it."
+            ),
         }
 
     async def _lookup_word(lemma: str) -> dict[str, Any] | str:
@@ -237,6 +278,18 @@ def build_tools(db: AsyncSession, user: User) -> list[BaseTool]:
                 "from memory."
             ),
             args_schema=SearchKnowledgeBaseArgs,
+        ),
+        StructuredTool.from_function(
+            coroutine=_expand_knowledge_base,
+            name="expand_knowledge_base",
+            description=(
+                "Add a new learning pack (5-10 vocabulary items, 5-10 grammar example "
+                "sentences, plus short articles and stories, all at the learner's level) "
+                "to the knowledge base for a topic. Call this ONLY when "
+                "search_knowledge_base returned no relevant material for a learning "
+                "request — then search again and ground your answer in the new pack."
+            ),
+            args_schema=ExpandKnowledgeBaseArgs,
         ),
         StructuredTool.from_function(
             coroutine=_lookup_word,

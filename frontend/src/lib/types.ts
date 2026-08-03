@@ -392,6 +392,7 @@ export type SpeakingScenario = {
   title: string;
   persona: string;
   opening: string;
+  cefr_level: CefrLevel;
 };
 
 export type SpeakingCorrection = {

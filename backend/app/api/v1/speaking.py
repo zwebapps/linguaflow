@@ -46,32 +46,134 @@ router = APIRouter()
 CEFR = Literal["A1", "A2", "B1", "B2", "C1"]
 
 # Role-play settings. Kept in code (not the DB) for V1 — they're content, and the
-# admin KB is the right home for them later.
+# admin KB is the right home for them later. Every CEFR level gets several
+# topics; `cefr` is the RECOMMENDED level (any learner may pick any scenario —
+# the tutor speaks at the LEARNER's level regardless).
 SCENARIOS: dict[str, dict[str, str]] = {
+    # ── A1 — first contact, concrete needs ──────────────────────────────────
+    "smalltalk": {
+        "title": "Everyday small talk",
+        "persona": "a neighbour chatting by the mailboxes",
+        "opening": "Hallo! Wie geht es Ihnen heute?",
+        "cefr": "A1",
+    },
+    "introductions": {
+        "title": "Introducing yourself",
+        "persona": "a friendly new colleague on your first day",
+        "opening": "Hallo, ich bin Lena! Und wie heißen Sie?",
+        "cefr": "A1",
+    },
     "restaurant": {
         "title": "Ordering food",
         "persona": "a friendly waiter in a Berlin café",
         "opening": "Guten Tag! Was möchten Sie bestellen?",
+        "cefr": "A1",
     },
-    "directions": {
-        "title": "Asking for directions",
-        "persona": "a helpful passer-by on a Munich street",
-        "opening": "Entschuldigung, brauchen Sie Hilfe?",
+    "bakery": {
+        "title": "At the bakery",
+        "persona": "a cheerful baker behind the counter",
+        "opening": "Guten Morgen! Was darf es sein?",
+        "cefr": "A1",
     },
     "shopping": {
         "title": "Shopping for clothes",
         "persona": "a shop assistant in a clothing store",
         "opening": "Hallo! Suchen Sie etwas Bestimmtes?",
+        "cefr": "A1",
     },
-    "smalltalk": {
-        "title": "Everyday small talk",
-        "persona": "a neighbour chatting by the mailboxes",
-        "opening": "Hallo! Wie geht es Ihnen heute?",
+    # ── A2 — getting around, everyday services ──────────────────────────────
+    "directions": {
+        "title": "Asking for directions",
+        "persona": "a helpful passer-by on a Munich street",
+        "opening": "Entschuldigung, brauchen Sie Hilfe?",
+        "cefr": "A2",
+    },
+    "train": {
+        "title": "At the train station",
+        "persona": "a Deutsche Bahn ticket clerk",
+        "opening": "Guten Tag! Wohin möchten Sie fahren?",
+        "cefr": "A2",
     },
     "doctor": {
         "title": "At the doctor's office",
         "persona": "a GP's receptionist",
         "opening": "Guten Tag. Was können wir für Sie tun?",
+        "cefr": "A2",
+    },
+    "hotel": {
+        "title": "Checking into a hotel",
+        "persona": "a hotel receptionist in Hamburg",
+        "opening": "Herzlich willkommen! Haben Sie reserviert?",
+        "cefr": "A2",
+    },
+    "hobbies": {
+        "title": "Talking about hobbies",
+        "persona": "someone you just met at a sports club",
+        "opening": "Und was machen Sie gern in Ihrer Freizeit?",
+        "cefr": "A2",
+    },
+    # ── B1 — organising your life ────────────────────────────────────────────
+    "apartment": {
+        "title": "Apartment viewing",
+        "persona": "a landlord showing a flat in Cologne",
+        "opening": "Schön, dass Sie da sind! Kommen Sie rein — das ist das Wohnzimmer.",
+        "cefr": "B1",
+    },
+    "appointment": {
+        "title": "Making an appointment by phone",
+        "persona": "an office assistant answering the phone",
+        "opening": "Praxis Dr. Weber, guten Tag. Wie kann ich Ihnen helfen?",
+        "cefr": "B1",
+    },
+    "complaint": {
+        "title": "Returning a faulty product",
+        "persona": "a customer-service employee at an electronics store",
+        "opening": "Guten Tag! Wie kann ich Ihnen helfen?",
+        "cefr": "B1",
+    },
+    "weekend": {
+        "title": "Planning a weekend trip",
+        "persona": "a good friend planning a trip with you",
+        "opening": "Du, ich habe eine Idee — wollen wir am Wochenende wegfahren?",
+        "cefr": "B1",
+    },
+    # ── B2 — work and opinions ───────────────────────────────────────────────
+    "job_interview": {
+        "title": "Job interview",
+        "persona": "a hiring manager at a Berlin software company",
+        "opening": "Schön, Sie kennenzulernen! Erzählen Sie doch kurz etwas über sich.",
+        "cefr": "B2",
+    },
+    "debate_transport": {
+        "title": "Debating: cars in the city",
+        "persona": "a colleague who loves a friendly argument",
+        "opening": "Also ich finde, Autos gehören nicht in die Innenstadt. Was meinen Sie?",
+        "cefr": "B2",
+    },
+    "bank": {
+        "title": "Opening a bank account",
+        "persona": "a bank advisor",
+        "opening": "Guten Tag! Sie möchten ein Konto eröffnen, richtig?",
+        "cefr": "B2",
+    },
+    # ── C1 — nuance and register ────────────────────────────────────────────
+    "negotiation": {
+        "title": "Negotiating a salary",
+        "persona": "your manager in a yearly review meeting",
+        "opening": "So, dann kommen wir zum Thema Gehalt. Wie sehen Sie Ihre Entwicklung?",
+        "cefr": "C1",
+    },
+    "society": {
+        "title": "Discussing media and society",
+        "persona": "a journalist interviewing you for a panel",
+        "opening": "Man sagt, soziale Medien verändern unsere Demokratie. Wie ist Ihre Einschätzung?",
+        "cefr": "C1",
+    },
+    "academia": {
+        "title": "Office hours with a professor",
+        "persona": "a professor discussing your thesis proposal",
+        "opening": "Ich habe Ihr Exposé gelesen. Erläutern Sie mir bitte Ihre Fragestellung.",
+        "cefr": "C1",
     },
 }
 
@@ -81,11 +183,21 @@ class ScenarioOut(BaseModel):
     title: str
     persona: str
     opening: str
+    cefr_level: str
 
 
 @router.get("/scenarios", response_model=list[ScenarioOut])
 async def list_scenarios(user: CurrentUser) -> list[ScenarioOut]:
-    return [ScenarioOut(id=k, **v) for k, v in SCENARIOS.items()]
+    return [
+        ScenarioOut(
+            id=k,
+            title=v["title"],
+            persona=v["persona"],
+            opening=v["opening"],
+            cefr_level=v.get("cefr", "A1"),
+        )
+        for k, v in SCENARIOS.items()
+    ]
 
 
 class SpeakRequest(BaseModel):

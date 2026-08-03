@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -26,6 +28,19 @@ import type {
 
 export type SpeakingMode = "auto" | "hold";
 export type SpeakingPhase = "idle" | "listening" | "sending" | "replying";
+
+/**
+ * One completed exchange, kept client-side so the learner can REPLAY their own
+ * recording next to its corrections — hearing your own mistake is the feedback
+ * that sticks. Audio lives in an object URL (never uploaded twice, revoked on
+ * cleanup); nothing here goes to the server.
+ */
+type TurnRecord = {
+  id: number;
+  audioUrl: string;
+  transcript: string | null;
+  scores: SpeakingStreamScores | null;
+};
 
 /** End-of-session feedback, aggregated over every scored turn. */
 type SessionSummary = {
@@ -104,9 +119,16 @@ export function SpeakingSession({
   initialScenarioId?: string;
 }) {
   const [scenarioId, setScenarioId] = useState(
-    initialScenarioId ?? scenarios[0]?.id ?? "smalltalk",
+    // Default to a topic AT the learner's level, not merely the first entry.
+    initialScenarioId ??
+      scenarios.find((s) => s.cefr_level === cefrLevel)?.id ??
+      scenarios[0]?.id ??
+      "smalltalk",
   );
   const scenario = scenarios.find((s) => s.id === scenarioId) ?? scenarios[0];
+  const levelsInOrder = (["A1", "A2", "B1", "B2", "C1"] as const).filter((lvl) =>
+    scenarios.some((s) => s.cefr_level === lvl),
+  );
 
   const [mode, setMode] = useState<SpeakingMode>("auto");
   const [phase, setPhase] = useState<SpeakingPhase>("idle");
@@ -125,8 +147,25 @@ export function SpeakingSession({
   const [turn, setTurn] = useState(1);
   const [totalTurns, setTotalTurns] = useState(10);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const [turns, setTurns] = useState<TurnRecord[]>([]);
   const turnScoresRef = useRef<SpeakingStreamScores[]>([]);
   const completeRef = useRef(false);
+  const turnIdRef = useRef(0);
+
+  // Object-URL bookkeeping lives in a ref too: state updaters don't run on an
+  // unmounted component, and a leaked blob URL pins the whole recording.
+  const turnUrlsRef = useRef<string[]>([]);
+
+  const clearTurns = useCallback(() => {
+    turnUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+    turnUrlsRef.current = [];
+    setTurns([]);
+  }, []);
+
+  useEffect(() => {
+    const urls = turnUrlsRef.current;
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, []);
 
   const sessionRef = useRef(false);
   const modeRef = useRef<SpeakingMode>("auto");
@@ -193,7 +232,8 @@ export function SpeakingSession({
     setTurn(1);
     setSummary(null);
     turnScoresRef.current = [];
-  }, [scenarioId]);
+    clearTurns();
+  }, [scenarioId, clearTurns]);
 
   const speakOpening = useCallback(() => {
     if (!scenario?.opening || muted) return;
@@ -276,6 +316,18 @@ export function SpeakingSession({
       setScores(null);
       setError(null);
 
+      // Keep the recording so the learner can replay their own voice next to
+      // the corrections. Filled in as the stream's frames arrive.
+      const turnId = ++turnIdRef.current;
+      const audioUrl = URL.createObjectURL(blob);
+      turnUrlsRef.current.push(audioUrl);
+      setTurns((prev) => [
+        { id: turnId, audioUrl, transcript: null, scores: null },
+        ...prev,
+      ]);
+      const patchTurn = (patch: Partial<TurnRecord>) =>
+        setTurns((prev) => prev.map((t) => (t.id === turnId ? { ...t, ...patch } : t)));
+
       const form = new FormData();
       form.append("audio", blob, "turn.webm");
       form.append("scenario", scenarioId);
@@ -298,11 +350,15 @@ export function SpeakingSession({
               if (d.total_turns) setTotalTurns(d.total_turns);
             },
             onStatus: (d) => setStatusLabel(d.label),
-            onTranscript: (d) => setLastTranscript(d.text),
+            onTranscript: (d) => {
+              setLastTranscript(d.text);
+              patchTurn({ transcript: d.text });
+            },
             onToken: (d) => setAssistantReply((prev) => prev + d.text),
             onScores: (d) => {
               setScores(d);
               turnScoresRef.current.push(d);
+              patchTurn({ scores: d });
             },
             onAudio: (d) => {
               setPhase("replying");
@@ -422,6 +478,7 @@ export function SpeakingSession({
     setTurn(1);
     setSummary(null);
     turnScoresRef.current = [];
+    clearTurns();
     completeRef.current = false;
     sessionRef.current = true;
     setSessionActive(true);
@@ -436,7 +493,7 @@ export function SpeakingSession({
     // Via the ref: the awaits above straddle renders, and a stale closure here
     // would carry the previous session's thread id into the first turn.
     if (sessionRef.current) beginListeningRef.current();
-  }, [beginListening, openMic, scenario?.opening]);
+  }, [clearTurns, openMic, scenario?.opening]);
 
   const endConversation = useCallback(() => {
     sessionRef.current = false;
@@ -482,10 +539,20 @@ export function SpeakingSession({
               <SelectValue placeholder="Scenario" />
             </SelectTrigger>
             <SelectContent>
-              {scenarios.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.title}
-                </SelectItem>
+              {levelsInOrder.map((lvl) => (
+                <SelectGroup key={lvl}>
+                  <SelectLabel>
+                    {lvl}
+                    {lvl === cefrLevel ? " · your level" : ""}
+                  </SelectLabel>
+                  {scenarios
+                    .filter((s) => s.cefr_level === lvl)
+                    .map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.title}
+                      </SelectItem>
+                    ))}
+                </SelectGroup>
               ))}
             </SelectContent>
           </Select>
@@ -603,6 +670,57 @@ export function SpeakingSession({
             <p className="text-sm text-muted-foreground">Reply streams here after each turn.</p>
           )}
         </div>
+
+        {turns.length > 0 && (
+          <div className="neo-card panel space-y-3 rounded-xl p-4">
+            <p className="label-mono">Your turns — listen back</p>
+            <p className="text-xs text-muted-foreground">
+              Replay your own voice next to the correction — that&apos;s where mistakes stick.
+            </p>
+            <ul className="space-y-3">
+              {turns.map((t, idx) => (
+                <li key={t.id} className="space-y-1.5 border-t border-border pt-2 first:border-t-0 first:pt-0">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="shrink-0 text-[10px]">
+                      Turn {turns.length - idx}
+                    </Badge>
+                    {t.scores && (
+                      <span className="text-xs text-muted-foreground">
+                        {Math.round(t.scores.overall * 100)}% overall
+                      </span>
+                    )}
+                  </div>
+                  {/* eslint-disable-next-line jsx-a11y/media-has-caption -- learner's own speech; the transcript below is the caption */}
+                  <audio controls preload="metadata" src={t.audioUrl} className="h-8 w-full" />
+                  {t.transcript && <p className="text-xs italic">„{t.transcript}"</p>}
+                  {t.scores?.corrections.map((c, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs">
+                      <button
+                        type="button"
+                        className="mt-0.5 shrink-0 text-primary underline-offset-2 hover:underline"
+                        aria-label="Hear the corrected sentence"
+                        title="Hear it said correctly"
+                        onClick={() =>
+                          void playSpeakingAudio(
+                            { use_browser_tts: true, text: c.suggestion, lang: "de-DE", data_uri: null },
+                            false,
+                          )
+                        }
+                      >
+                        🔊
+                      </button>
+                      <p>
+                        <span className="line-through opacity-70">{c.original}</span> →{" "}
+                        <span className="font-medium">{c.suggestion}</span>
+                        <span className="block text-muted-foreground">{c.explanation}</span>
+                      </p>
+                    </div>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {scores && (
           <div className="neo-card panel space-y-3 rounded-xl p-4">

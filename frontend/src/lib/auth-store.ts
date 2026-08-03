@@ -98,13 +98,21 @@ export const useAuthStore = create<AuthState>()(
  * until this is true.
  */
 export function useAuthHydrated(): boolean {
-  const [hydrated, setHydrated] = useState(() => useAuthStore.persist.hasHydrated());
+  // `.persist` is undefined during SSR — every read is optional-chained, and
+  // the server always answers "not hydrated yet" (the effect settles it on
+  // the client, where the persist API exists).
+  const [hydrated, setHydrated] = useState(
+    () => useAuthStore.persist?.hasHydrated?.() ?? false,
+  );
   useEffect(() => {
-    if (useAuthStore.persist.hasHydrated()) {
+    if (useAuthStore.persist?.hasHydrated?.()) {
       setHydrated(true);
       return;
     }
-    return useAuthStore.persist.onFinishHydration(() => setHydrated(true));
+    const unsub = useAuthStore.persist?.onFinishHydration?.(() => setHydrated(true));
+    // No persist API at all would otherwise lock the gates shut forever.
+    if (!unsub) setHydrated(true);
+    return unsub;
   }, []);
   return hydrated;
 }
