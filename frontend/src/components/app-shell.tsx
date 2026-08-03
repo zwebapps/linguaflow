@@ -24,6 +24,7 @@ import { useAppThemeId } from "@/hooks/use-app-theme";
 import { useSidebarBrandingExpanded } from "@/hooks/use-sidebar-branding";
 import { LinguaFlowLogo } from "@/components/linguaflow-logo";
 import { LearnerThemeSwitcher } from "@/components/learner-theme-switcher";
+import { UserChip } from "@/components/user-chip";
 import { VerifyEmailBanner } from "@/components/verify-email-banner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -218,10 +219,18 @@ export function AppShell({
         <VerifyEmailBanner />
         <header
           className={cn(
-            "sticky top-0 z-20 px-5 py-4 backdrop-blur md:px-8",
-            vitalityMode ? "vitality-shell-header" : "border-b border-border bg-background/90",
+            "sticky top-0 z-20 backdrop-blur-md",
+            vitalityMode
+              ? "vitality-shell-header"
+              : "border-b border-border/60 bg-background/85",
           )}
         >
+          {/* Slim brand accent — reads as finish, not decoration. */}
+          <div
+            aria-hidden
+            className="h-0.5 w-full bg-gradient-to-r from-primary/70 via-primary/25 to-transparent"
+          />
+          <div className="px-5 py-3.5 md:px-8">
           <div className="flex flex-wrap items-center gap-4">
             <Button
               type="button"
@@ -239,19 +248,31 @@ export function AppShell({
               <h1 className="truncate font-display text-xl font-semibold tracking-tight md:text-2xl" suppressHydrationWarning>{title}</h1>
               <p className="truncate text-sm text-muted-foreground" suppressHydrationWarning>{subtitle}</p>
             </div>
-            {vitalityMode && (
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="rounded-xl" aria-label="Notifications">
-                  <Bell className="size-5" strokeWidth={1.75} />
-                </Button>
-                <Button variant="ghost" size="icon" className="rounded-xl" asChild aria-label="Settings">
-                  <Link to="/settings">
-                    <Settings className="size-5" strokeWidth={1.75} />
-                  </Link>
-                </Button>
-              </div>
-            )}
-            {actions}
+            {actions && <div className="flex items-center gap-2">{actions}</div>}
+            <div className="hidden h-6 w-px bg-border/80 sm:block" aria-hidden />
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative rounded-xl text-muted-foreground hover:text-foreground"
+                aria-label="Notifications"
+              >
+                <Bell className="size-[18px]" strokeWidth={1.75} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-xl text-muted-foreground hover:text-foreground"
+                asChild
+                aria-label="Settings"
+              >
+                <Link to="/settings">
+                  <Settings className="size-[18px]" strokeWidth={1.75} />
+                </Link>
+              </Button>
+            </div>
+            <UserChip className="shrink-0" />
+          </div>
           </div>
         </header>
 

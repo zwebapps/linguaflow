@@ -16,6 +16,7 @@ import { LinguaFlowLogo } from "@/components/linguaflow-logo";
 import { AdminRuntimeStatus } from "@/components/admin/admin-runtime-status";
 import { LearnerThemeSwitcher } from "@/components/learner-theme-switcher";
 import { Button } from "@/components/ui/button";
+import { UserChip } from "@/components/user-chip";
 import { cn } from "@/lib/utils";
 
 const adminNav = [
@@ -128,8 +129,12 @@ export function AdminShell({
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <header className="border-b border-border bg-background px-4 py-5 md:px-8">
-          <div className="flex items-center gap-3">
+        <header className="sticky top-0 z-20 border-b border-border/60 bg-background/85 backdrop-blur-md">
+          <div
+            aria-hidden
+            className="h-0.5 w-full bg-gradient-to-r from-primary/70 via-primary/25 to-transparent"
+          />
+          <div className="flex items-center gap-3 px-4 py-3.5 md:px-8">
             <Button
               type="button"
               variant="ghost"
@@ -146,6 +151,11 @@ export function AdminShell({
               <h1 className="truncate font-display text-xl font-semibold">{title}</h1>
               <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
             </div>
+            <span className="hidden rounded-full border border-border/70 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground lg:inline-block">
+              Ops console
+            </span>
+            <div className="hidden h-6 w-px bg-border/80 sm:block" aria-hidden />
+            <UserChip href={null} className="shrink-0" />
           </div>
         </header>
         <main className="flex-1 bg-background px-4 py-6 md:p-8">{children}</main>
