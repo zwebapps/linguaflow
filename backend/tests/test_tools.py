@@ -81,6 +81,10 @@ def _make_user() -> User:
         password_hash="x",
         display_name="Learner",
         cefr_level="A2",
+        # NOT NULL on the real model. The conjugation tool reads it to choose a
+        # language engine, so omitting it here would describe a user that cannot
+        # exist and push the tool into a defensive default.
+        target_language="de",
     )
 
 
@@ -101,9 +105,16 @@ def test_lookup_word_accepts_umlauts_and_hyphen() -> None:
     assert registry.LookupWordArgs(lemma="Grün-Kohl").lemma == "Grün-Kohl"
 
 
-def test_conjugate_verb_rejects_bogus_tense() -> None:
+def test_conjugate_verb_rejects_an_over_long_tense_at_the_schema() -> None:
+    """The schema now bounds LENGTH, not vocabulary.
+
+    Tense names are per language (`praesens` vs `presente`), so a Literal union of
+    every language's tenses would let the model ask for a German tense while
+    teaching Spanish. Validating the NAME moved to the dispatcher, which knows
+    which engine is in play — see the tool test below.
+    """
     with pytest.raises(ValidationError):
-        registry.ConjugateVerbArgs(verb="gehen", tense="future-perfect-continuous")
+        registry.ConjugateVerbArgs(verb="gehen", tense="x" * 33)
 
 
 def test_conjugate_verb_accepts_real_tense() -> None:

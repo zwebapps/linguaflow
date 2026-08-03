@@ -26,16 +26,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import structured
-from app.ai.tools import dictionary
-from app.ai.tools.conjugation import Tense, conjugate
+from app.ai.tools import conjugators, dictionary
 from app.db.models import Flashcard, User, Vocabulary
 from app.rag import retriever as rag_retriever
 
 log = structlog.get_logger(__name__)
 
 # API_CONTRACT.md §11 validation rules, mirrored here as the tools' input schemas.
-_LEMMA_PATTERN = r"^[A-Za-zÄÖÜäöüß-]{1,64}$"
-_VERB_PATTERN = r"^[A-Za-zÄÖÜäöüß-]{1,48}$"
+# Multilingual: `À-ÿ` covers the Latin-1 accents these languages need (ä ö ü ß,
+# é è ê ç, ñ í ó ú à ì) and `Œœ` the French ligature. Previously German-only, so
+# a Spanish learner asking about `enseñar` was rejected by the SCHEMA before any
+# engine saw it. This is defence-in-depth — each engine still validates its own
+# infinitive shape, and does it with a better error message.
+_LEMMA_PATTERN = r"^[A-Za-zÀ-ÿŒœ'’-]{1,64}$"
+_VERB_PATTERN = r"^[A-Za-zÀ-ÿŒœ'’-]{1,48}$"
 
 CefrLevel = Literal["A1", "A2", "B1", "B2", "C1"]
 
@@ -55,7 +59,11 @@ class LookupWordArgs(BaseModel):
 
 class ConjugateVerbArgs(BaseModel):
     verb: str = Field(..., pattern=_VERB_PATTERN)
-    tense: Tense
+    # A plain string, not a Literal: tense NAMES are per language (`praesens` vs
+    # `presente`), and a union of every language's tenses would let the model ask
+    # for a German tense in Spanish. The dispatcher validates against the engine
+    # actually being used and names the real alternatives when it refuses.
+    tense: str = Field(default="", max_length=32)
 
 
 class GenerateQuizArgs(BaseModel):
@@ -124,14 +132,27 @@ def build_tools(db: AsyncSession, user: User) -> list[BaseTool]:
             log.warning("tool_lookup_word_failed", lemma=lemma, error=str(exc))
             return f"Couldn't look up '{lemma}' right now. Try again shortly."
 
-    async def _conjugate_verb(verb: str, tense: Tense) -> dict[str, Any] | str:
+    async def _conjugate_verb(verb: str, tense: str = "") -> dict[str, Any] | str:
+        # Routed by the language the learner is STUDYING, from the closure — never
+        # a tool argument. Before this the German engine was called for everyone,
+        # so a Spanish learner asking about `tener` was told it is not a valid
+        # -en/-n infinitive.
+        language = user.target_language
         try:
-            return dict(conjugate(verb, tense))
+            return conjugators.conjugate(language, verb, tense or None)
         except ValueError as exc:
-            # conjugate() raises for anything that isn't a plausible -en/-n infinitive.
-            return f"'{verb}' doesn't look like a German infinitive: {exc}"
+            # Either an unsupported language/tense, or not a plausible infinitive.
+            # The message already names what IS available, so pass it through
+            # rather than replacing it with something vaguer.
+            return str(exc)
         except Exception as exc:
-            log.warning("tool_conjugate_verb_failed", verb=verb, tense=tense, error=str(exc))
+            log.warning(
+                "tool_conjugate_verb_failed",
+                verb=verb,
+                tense=tense,
+                language=language,
+                error=str(exc),
+            )
             return f"Couldn't conjugate '{verb}' right now."
 
     async def _generate_quiz(topic: str, cefr_level: str, n: int) -> dict[str, Any] | str:
@@ -231,9 +252,11 @@ def build_tools(db: AsyncSession, user: User) -> list[BaseTool]:
             coroutine=_conjugate_verb,
             name="conjugate_verb",
             description=(
-                "Conjugate a German verb, given in its infinitive form, into a specific "
-                "tense. Always use this instead of producing a conjugation from memory — "
-                "conjugation is computed by a deterministic rule engine, never guessed."
+                "Conjugate a verb IN THE LANGUAGE THE LEARNER IS STUDYING, given in its "
+                "infinitive form. Leave `tense` empty for the present. Always use this "
+                "instead of producing a conjugation from memory — it is computed by a "
+                "deterministic rule engine per language, never guessed. If the engine "
+                "refuses, report its message rather than substituting your own paradigm."
             ),
             args_schema=ConjugateVerbArgs,
         ),
