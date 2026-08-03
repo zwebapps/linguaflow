@@ -9,18 +9,37 @@ import { CefrBadge } from "@/components/shared/cefr-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorAlert } from "@/components/shared/error-alert";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 import type { LibraryItem, Paginated } from "@/lib/types";
 import { Library } from "lucide-react";
 
 export default function LibraryPage() {
   const [q, setQ] = useState("");
+  // Show the learner's own level first — that is what they set their profile
+  // to study at. "All levels" stays one click away for browsing ahead.
+  const myLevel = useAuthStore((s) => s.user)?.cefr_level;
+  const [level, setLevel] = useState<string | null>(null);
+  const effectiveLevel = level ?? myLevel ?? "all";
+
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["library", q],
-    queryFn: () =>
-      apiFetch<Paginated<LibraryItem>>(`/library${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+    queryKey: ["library", q, effectiveLevel],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (effectiveLevel !== "all") params.set("level", effectiveLevel);
+      const qs = params.toString();
+      return apiFetch<Paginated<LibraryItem>>(`/library${qs ? `?${qs}` : ""}`);
+    },
   });
 
   return (
@@ -32,6 +51,20 @@ export default function LibraryPage() {
           onChange={(e) => setQ(e.target.value)}
           className="max-w-sm"
         />
+        <Select value={effectiveLevel} onValueChange={(v) => setLevel(v)}>
+          <SelectTrigger className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {["A1", "A2", "B1", "B2", "C1"].map((l) => (
+              <SelectItem key={l} value={l}>
+                {l}
+                {l === myLevel ? " · your level" : ""}
+              </SelectItem>
+            ))}
+            <SelectItem value="all">All levels</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       {isError && (
         <ErrorAlert
@@ -49,8 +82,12 @@ export default function LibraryPage() {
       {data?.items.length === 0 && (
         <EmptyState
           icon={<Library className="size-10" />}
-          title="No content yet"
-          description="New readings and grammar sheets will show up here when your course team adds them."
+          title={effectiveLevel === "all" ? "No content yet" : `Nothing at ${effectiveLevel} yet`}
+          description={
+            effectiveLevel === "all"
+              ? "New readings and grammar sheets will show up here when your course team adds them."
+              : "Nothing is graded at this level yet — switch to “All levels” to browse everything in your language."
+          }
         />
       )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

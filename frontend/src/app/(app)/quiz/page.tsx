@@ -12,20 +12,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { TopicSelect } from "@/components/learner/topic-select";
 import { apiFetch } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 import { quizCountSchema } from "@/lib/validation";
-import type { CefrLevel, QuizGenerateResponse, QuizSubmitResponse } from "@/lib/types";
+import type { QuizGenerateResponse, QuizSubmitResponse } from "@/lib/types";
 
 export default function QuizPage() {
-  const [topic, setTopic] = useState("dative case");
-  const [level, setLevel] = useState<CefrLevel>("A2");
+  // The quiz runs at the level the learner set in their profile — the page
+  // used to hardcode A2, which quizzed A1 and C1 learners alike at A2.
+  const level = useAuthStore((s) => s.user)?.cefr_level ?? "A1";
+  const [topic, setTopic] = useState("");
   const [count, setCount] = useState(5);
   const [quiz, setQuiz] = useState<QuizGenerateResponse | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -63,24 +60,16 @@ export default function QuizPage() {
     <AppShell title="Quiz" subtitle="Generate and grade MCQ / cloze exercises">
       {!quiz && (
         <div className="panel max-w-lg space-y-4 rounded-lg p-6">
-          <div className="space-y-2">
-            <Label>Topic</Label>
-            <Input value={topic} onChange={(e) => setTopic(e.target.value)} />
+          <div className="flex items-center justify-between">
+            <Label>Your level</Label>
+            <div className="flex items-center gap-2">
+              <CefrBadge level={level} />
+              <span className="text-xs text-muted-foreground">change it in Settings</span>
+            </div>
           </div>
           <div className="space-y-2">
-            <Label>CEFR</Label>
-            <Select value={level} onValueChange={(v) => setLevel(v as CefrLevel)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {["A1", "A2", "B1", "B2", "C1"].map((l) => (
-                  <SelectItem key={l} value={l}>
-                    {l}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label>Topic</Label>
+            <TopicSelect level={level} value={topic} onChange={setTopic} />
           </div>
           <div className="space-y-2">
             <Label>Questions</Label>
@@ -90,7 +79,7 @@ export default function QuizPage() {
             <ErrorAlert message={generate.error.message} onRetry={() => generate.mutate()} />
           )}
           <Button
-            disabled={!quizCountSchema.safeParse(count).success || generate.isPending}
+            disabled={!topic.trim() || !quizCountSchema.safeParse(count).success || generate.isPending}
             onClick={() => generate.mutate()}
           >
             {generate.isPending ? <Spinner label="Generating…" /> : "Generate quiz"}

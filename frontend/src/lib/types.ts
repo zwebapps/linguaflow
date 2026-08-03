@@ -17,6 +17,20 @@ export type ApiErrorBody = {
   };
 };
 
+export type Topic = {
+  id: string;
+  level: CefrLevel;
+  kind: "grammar" | "theme";
+  title: string;
+  title_en: string;
+};
+
+export type TopicsResponse = {
+  language: string;
+  level: CefrLevel;
+  items: Topic[];
+};
+
 export type User = {
   id: string;
   email: string;

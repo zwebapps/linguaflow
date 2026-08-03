@@ -212,6 +212,17 @@ The tutor calls tools autonomously, but these screens invoke them directly.
   "chunk_count":42,"created_at":"…" }
 ```
 
+### `GET /api/v1/topics?level=&language=`
+The per-level syllabus behind the "pick a topic and start" dropdowns (quiz, writing).
+Both params optional — defaults are the **learner's own** `cefr_level` and
+`target_language` from their profile. Empty `items` means the language has no
+curated syllabus yet; clients fall back to free-text topic entry.
+```json
+{ "language":"de","level":"A2",
+  "items":[ { "id":"de-a2-dativ","level":"A2","kind":"grammar|theme",
+              "title":"Der Dativ","title_en":"The dative case" } ] }
+```
+
 ---
 
 ## 5. Vocabulary & flashcards

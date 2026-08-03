@@ -465,6 +465,31 @@ export const handlers = [
     });
   }),
 
+  // Trimmed mirror of the backend topic registry — enough for the dropdowns.
+  http.get(`${base}/topics`, async ({ request }) => {
+    if (!bearerUser(request))
+      return HttpResponse.json({ error: { code: "unauthorized" } }, { status: 401 });
+    await delay(120);
+    const url = new URL(request.url);
+    const level = url.searchParams.get("level") ?? "B1";
+    const mk = (slug: string, kind: "grammar" | "theme", title: string, title_en: string) => ({
+      id: `de-${level.toLowerCase()}-${slug}`,
+      level,
+      kind,
+      title,
+      title_en,
+    });
+    return HttpResponse.json({
+      language: "de",
+      level,
+      items: [
+        mk("dativ", "grammar", "Der Dativ", "The dative case"),
+        mk("perfekt", "grammar", "Das Perfekt", "Present perfect tense"),
+        mk("reisen", "theme", "Reisen und Verkehr", "Travel and transport"),
+      ],
+    });
+  }),
+
   http.post(`${base}/quiz/generate`, async ({ request }) => {
     if (!bearerUser(request))
       return HttpResponse.json(

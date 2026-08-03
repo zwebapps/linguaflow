@@ -15,20 +15,27 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { apiFetch } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 import { writingTextSchema } from "@/lib/validation";
-import type { CefrLevel, WritingEvaluateResponse } from "@/lib/types";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import type { Topic, WritingEvaluateResponse } from "@/lib/types";
+import { TopicSelect } from "@/components/learner/topic-select";
+
+/** A picked topic becomes a concrete writing task; free text stays editable. */
+function promptForTopic(title: string, meta?: Topic): string {
+  if (!title.trim()) return "";
+  if (meta?.kind === "grammar") {
+    return `Schreiben Sie 5–8 Sätze und verwenden Sie dabei: ${title} (${meta.title_en}).`;
+  }
+  return `Schreiben Sie einen kurzen Text zum Thema „${title}“.`;
+}
 
 export default function WritingPage() {
+  // Feedback targets the level the learner set in their profile — the page
+  // used to hardcode B1 for everyone.
+  const level = useAuthStore((s) => s.user)?.cefr_level ?? "A1";
+  const [topic, setTopic] = useState("");
   const [prompt, setPrompt] = useState("Describe your weekend.");
   const [text, setText] = useState("");
-  const [level, setLevel] = useState<CefrLevel>("B1");
   const [result, setResult] = useState<WritingEvaluateResponse | null>(null);
 
   const evaluate = useMutation({
@@ -51,24 +58,30 @@ export default function WritingPage() {
         />
         <div className="grid gap-6 lg:grid-cols-2">
         <ActivityWorksheet className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label className="text-[var(--worksheet-fg)]">Your level</Label>
+            <div className="flex items-center gap-2">
+              <CefrBadge level={level} />
+              <span className="text-xs" style={{ color: "var(--worksheet-muted)" }}>
+                change it in Settings
+              </span>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-[var(--worksheet-fg)]">Topic</Label>
+            <TopicSelect
+              level={level}
+              value={topic}
+              onChange={(t, meta) => {
+                setTopic(t);
+                const p = promptForTopic(t, meta);
+                if (p) setPrompt(p);
+              }}
+            />
+          </div>
           <div className="space-y-2">
             <Label className="text-[var(--worksheet-fg)]">Prompt</Label>
             <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={2} className="border-[var(--worksheet-line)] bg-[var(--worksheet-card)]" />
-          </div>
-          <div className="space-y-2">
-            <Label className="text-[var(--worksheet-fg)]">Target level</Label>
-            <Select value={level} onValueChange={(v) => setLevel(v as CefrLevel)}>
-              <SelectTrigger className="border-[var(--worksheet-line)] bg-[var(--worksheet-card)]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {["A1", "A2", "B1", "B2", "C1"].map((l) => (
-                  <SelectItem key={l} value={l}>
-                    {l}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
           <div className="space-y-2">
             <Label className="text-[var(--worksheet-fg)]">Your text</Label>

@@ -17,6 +17,7 @@ from app.api.v1 import (
     quiz,
     speaking,
     tools,
+    topics,
     vocab,
     writing,
 )
@@ -31,6 +32,7 @@ api_router.include_router(tools.router, prefix="/tools", tags=["tools"])
 api_router.include_router(speaking.router, prefix="/speaking", tags=["speaking"])
 # Learning content
 api_router.include_router(library.router, prefix="/library", tags=["library"])
+api_router.include_router(topics.router, prefix="/topics", tags=["topics"])
 api_router.include_router(materials.router, prefix="/materials", tags=["materials"])
 api_router.include_router(vocab.router, prefix="/vocab", tags=["vocabulary"])
 api_router.include_router(flashcards.router, prefix="/flashcards", tags=["flashcards"])
