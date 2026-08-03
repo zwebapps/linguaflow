@@ -89,7 +89,10 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   if (res.status === 401 && typeof window !== "undefined" && !isAuthAttempt) {
     const { useAuthStore } = await import("./auth-store");
     useAuthStore.getState().logout();
-    window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+    // Send each portal to ITS OWN sign-in page — an admin bounced to the
+    // learner login reads as "the app logged me out and forgot who I am".
+    const login = window.location.pathname.startsWith("/admin") ? "/admin/login" : "/login";
+    window.location.href = `${login}?redirect=${encodeURIComponent(window.location.pathname)}`;
     throw await parseError(res);
   }
 

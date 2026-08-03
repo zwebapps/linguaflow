@@ -12,6 +12,9 @@ export function StudentAppGate({ children }: { children: React.ReactNode }) {
     const token = getAccessToken();
     const portal = getAuthPortal();
     if (!token || portal !== "student" || user?.role !== "student") {
+      // The admin console may hold the active slot; switch back to the saved
+      // learner session instead of logging out.
+      if (useAuthStore.getState().activatePortal("student")) return;
       router.replace("/login");
       return;
     }
