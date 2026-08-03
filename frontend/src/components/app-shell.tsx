@@ -24,6 +24,7 @@ import { useAppThemeId } from "@/hooks/use-app-theme";
 import { useSidebarBrandingExpanded } from "@/hooks/use-sidebar-branding";
 import { LinguaFlowLogo } from "@/components/linguaflow-logo";
 import { LearnerThemeSwitcher } from "@/components/learner-theme-switcher";
+import { NotificationsBell } from "@/components/notifications-bell";
 import { UserChip } from "@/components/user-chip";
 import { VerifyEmailBanner } from "@/components/verify-email-banner";
 import { Button } from "@/components/ui/button";
@@ -251,14 +252,7 @@ export function AppShell({
             {actions && <div className="flex items-center gap-2">{actions}</div>}
             <div className="hidden h-6 w-px bg-border/80 sm:block" aria-hidden />
             <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative rounded-xl text-muted-foreground hover:text-foreground"
-                aria-label="Notifications"
-              >
-                <Bell className="size-[18px]" strokeWidth={1.75} />
-              </Button>
+              <NotificationsBell />
               <Button
                 variant="ghost"
                 size="icon"

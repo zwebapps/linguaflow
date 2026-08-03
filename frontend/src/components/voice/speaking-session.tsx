@@ -4,6 +4,7 @@ import { ErrorAlert } from "@/components/shared/error-alert";
 import { Spinner } from "@/components/shared/spinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useNotificationsStore } from "@/lib/notifications-store";
 import {
   Select,
   SelectContent,
@@ -391,7 +392,14 @@ export function SpeakingSession({
         // Ten questions asked and answered — the session is over. Close the
         // mic and hand over the aggregated feedback.
         completeRef.current = false;
-        setSummary(summarise(turnScoresRef.current));
+        const s = summarise(turnScoresRef.current);
+        setSummary(s);
+        useNotificationsStore
+          .getState()
+          .notify(
+            "Speaking session complete 🎉",
+            `${s.turns} turns · overall ${Math.round(s.overall * 100)}% · ${s.corrections.length} correction${s.corrections.length === 1 ? "" : "s"} to review`,
+          );
         sessionRef.current = false;
         setSessionActive(false);
         releaseStream();
