@@ -152,7 +152,7 @@ export default function AdminPromptsPage() {
         />
       )}
       {isLoading && <Spinner label="Loading prompts…" />}
-      <div className="grid max-w-4xl gap-6">
+      <div className="grid w-full gap-6">
         {data?.map((item) => <PromptCard key={item.key} item={item} />)}
       </div>
     </AdminShell>
