@@ -517,7 +517,7 @@ export function SpeakingSession({
     vadRef.current.voiced = true;
     vadRef.current.calibrating = false;
     setUserSpeaking(true);
-  }, [beginListening, openMic]);
+  }, [openMic]);
 
   const holdStop = useCallback(() => {
     setUserSpeaking(false);
@@ -690,9 +690,9 @@ export function SpeakingSession({
                       </span>
                     )}
                   </div>
-                  {/* eslint-disable-next-line jsx-a11y/media-has-caption -- learner's own speech; the transcript below is the caption */}
+                  {/* Learner's own speech; the transcript below is the caption. */}
                   <audio controls preload="metadata" src={t.audioUrl} className="h-8 w-full" />
-                  {t.transcript && <p className="text-xs italic">„{t.transcript}"</p>}
+                  {t.transcript && <p className="text-xs italic">„{t.transcript}&ldquo;</p>}
                   {t.scores?.corrections.map((c, i) => (
                     <div key={i} className="flex items-start gap-2 text-xs">
                       <button

@@ -1,11 +1,22 @@
 import { Link, usePathname } from "@/components/router-link";
-import { Activity, BookOpen, Brain, Database, FlaskConical, Rss, ScrollText } from "lucide-react";
-import type { ReactNode } from "react";
+import {
+  Activity,
+  BookOpen,
+  Brain,
+  Database,
+  FlaskConical,
+  Menu,
+  Rss,
+  ScrollText,
+  X,
+} from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuthStore } from "@/lib/auth-store";
 import { LinguaFlowLogo } from "@/components/linguaflow-logo";
 import { AdminRuntimeStatus } from "@/components/admin/admin-runtime-status";
 import { LearnerThemeSwitcher } from "@/components/learner-theme-switcher";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 const adminNav = [
   { to: "/admin/knowledge-base", label: "Knowledge base", icon: Database },
@@ -31,14 +42,50 @@ export function AdminShell({
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
 
+  // Mobile: same off-canvas drawer as the learner shell — the horizontal pill
+  // strip it replaces hid most destinations off-screen. Navigation, the X,
+  // the backdrop, and Escape all close it.
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => setNavOpen(false), [pathname]);
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setNavOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
-      {/* Desktop-only: at phone widths this fixed 224px column left ~150px
-          for content — "cards under the sidebar". Mobile gets the pill strip
-          below instead, same pattern as the learner AppShell. */}
-      <aside className="hidden h-full w-56 shrink-0 flex-col border-r border-border bg-card md:flex">
+      {navOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] md:hidden"
+          onClick={() => setNavOpen(false)}
+          aria-hidden
+        />
+      )}
+      <aside
+        id="admin-sidebar"
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex h-full w-64 shrink-0 flex-col border-r border-border bg-card transition-transform duration-200 md:static md:z-auto md:w-56 md:translate-x-0 md:transition-none",
+          navOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
         <div className="border-b border-border px-4 py-5">
-          <LinguaFlowLogo variant="sidebar" to="/admin/knowledge-base" />
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <LinguaFlowLogo variant="sidebar" to="/admin/knowledge-base" />
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0 rounded-lg text-muted-foreground md:hidden"
+              onClick={() => setNavOpen(false)}
+              aria-label="Close navigation"
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
           <p className="mt-2 font-mono text-[10px] text-muted-foreground">LinguaFlow · ops console</p>
         </div>
         <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
@@ -65,8 +112,8 @@ export function AdminShell({
           <LearnerThemeSwitcher />
         </div>
         <div className="space-y-2 border-t border-border p-4 text-xs">
-          <p className="text-sm font-medium">{user?.display_name}</p>
-          <p className="text-muted-foreground">{user?.email}</p>
+          <p className="text-sm font-medium" suppressHydrationWarning>{user?.display_name}</p>
+          <p className="text-muted-foreground" suppressHydrationWarning>{user?.email}</p>
           <Button
             variant="outline"
             size="sm"
@@ -81,23 +128,27 @@ export function AdminShell({
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <header className="border-b border-border bg-background px-5 py-5 md:px-8">
-          <h1 className="font-display text-xl font-semibold">{title}</h1>
-          <p className="text-sm text-muted-foreground">{subtitle}</p>
-        </header>
-        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/30 px-3 py-2 md:hidden">
-          {adminNav.map((item) => (
-            <Link
-              key={item.to}
-              to={item.to}
-              className="whitespace-nowrap rounded-full px-3 py-1.5 text-xs text-muted-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground"
-              data-active={pathname.startsWith(item.to) || undefined}
+        <header className="border-b border-border bg-background px-4 py-5 md:px-8">
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0 rounded-xl md:hidden"
+              onClick={() => setNavOpen(true)}
+              aria-label="Open navigation"
+              aria-expanded={navOpen}
+              aria-controls="admin-sidebar"
             >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-        <main className="flex-1 bg-background p-8">{children}</main>
+              <Menu className="size-5" />
+            </Button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate font-display text-xl font-semibold">{title}</h1>
+              <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 bg-background px-4 py-6 md:p-8">{children}</main>
       </div>
     </div>
   );
