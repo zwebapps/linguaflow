@@ -18,14 +18,14 @@ export const PLATFORM_LANGUAGE_WORDMARKS: WordmarkStyle[] = [
   { label: "PORTUGUÊS", className: "font-sans text-[10px] font-bold uppercase tracking-[0.18em]" },
 ];
 
+// One pin per LANGUAGE market, not per country. Saudi Arabia stands in for the
+// whole Arabic-speaking region — listing UAE/Qatar/Oman beside it repeated the
+// same language four times while other platform languages had no pin at all.
 export const GLOBAL_MARKET_PINS = [
   { code: "USA", flag: "🇺🇸" },
   { code: "UK", flag: "🇬🇧" },
   { code: "GERMANY", flag: "🇩🇪" },
-  { code: "UAE", flag: "🇦🇪" },
   { code: "SAUDI ARABIA", flag: "🇸🇦" },
-  { code: "QATAR", flag: "🇶🇦" },
-  { code: "OMAN", flag: "🇴🇲" },
   { code: "PAKISTAN", flag: "🇵🇰" },
 ] as const;
 
