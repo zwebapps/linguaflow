@@ -9,14 +9,16 @@ import {
   ClipboardList,
   LayoutDashboard,
   Library,
+  Menu,
   MessagesSquare,
   PenLine,
   Search,
   Settings,
   Sparkles,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuthStore } from "@/lib/auth-store";
 import { useAppThemeId } from "@/hooks/use-app-theme";
 import { useSidebarBrandingExpanded } from "@/hooks/use-sidebar-branding";
@@ -61,8 +63,6 @@ const navSections: { label?: string; items: NavItem[] }[] = [
   },
 ];
 
-const flatNav = navSections.flatMap((s) => s.items);
-
 export function AppShell({
   title,
   subtitle,
@@ -84,14 +84,49 @@ export function AppShell({
 
   const isActive = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
 
+  // Mobile: the sidebar is an off-canvas drawer behind a hamburger toggle —
+  // it replaced a horizontally-scrolling pill strip that hid most destinations
+  // off-screen. Any navigation (and Escape) closes it.
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => setNavOpen(false), [pathname]);
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setNavOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
-      <aside className="hidden h-full w-[260px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex">
+      {navOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] md:hidden"
+          onClick={() => setNavOpen(false)}
+          aria-hidden
+        />
+      )}
+      <aside
+        id="app-sidebar"
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex h-full w-[260px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-transform duration-200 md:static md:z-auto md:translate-x-0 md:transition-none",
+          navOpen ? "translate-x-0" : "-translate-x-full",
+        )}
+      >
         <div className="border-b border-sidebar-border px-5 py-5">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <LinguaFlowLogo variant="sidebar" to="/dashboard" />
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 shrink-0 rounded-lg text-muted-foreground md:hidden"
+              onClick={() => setNavOpen(false)}
+              aria-label="Close navigation"
+            >
+              <X className="size-4" />
+            </Button>
             <Button
               type="button"
               variant="ghost"
@@ -160,8 +195,10 @@ export function AppShell({
         <div className="mt-auto shrink-0">
           <LearnerThemeSwitcher />
           <div className="space-y-2 border-t border-sidebar-border p-4">
-            <p className="truncate text-sm font-medium">{user?.display_name}</p>
-            <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
+            {/* Session data doesn't exist server-side; these text nodes are
+                EXPECTED to differ on first paint. */}
+            <p className="truncate text-sm font-medium" suppressHydrationWarning>{user?.display_name}</p>
+            <p className="truncate text-xs text-muted-foreground" suppressHydrationWarning>{user?.email}</p>
             <Button
               variant="outline"
               size="sm"
@@ -186,9 +223,21 @@ export function AppShell({
           )}
         >
           <div className="flex flex-wrap items-center gap-4">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0 rounded-xl md:hidden"
+              onClick={() => setNavOpen(true)}
+              aria-label="Open navigation"
+              aria-expanded={navOpen}
+              aria-controls="app-sidebar"
+            >
+              <Menu className="size-5" />
+            </Button>
             <div className="min-w-0 flex-1">
-              <h1 className="truncate font-display text-xl font-semibold tracking-tight md:text-2xl">{title}</h1>
-              <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
+              <h1 className="truncate font-display text-xl font-semibold tracking-tight md:text-2xl" suppressHydrationWarning>{title}</h1>
+              <p className="truncate text-sm text-muted-foreground" suppressHydrationWarning>{subtitle}</p>
             </div>
             {vitalityMode && (
               <div className="flex items-center gap-1">
@@ -205,23 +254,6 @@ export function AppShell({
             {actions}
           </div>
         </header>
-
-        {/* shrink-0 is load-bearing: this sits in a h-screen flex column, and
-            without it tall page content compressed the strip to a ~16px sliver
-            with the pills crushed to 12px — "navigation" that read as a stray
-            border. The links scroll horizontally; the BAR must never shrink. */}
-        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/30 px-3 py-2 md:hidden">
-          {flatNav.map((item) => (
-            <Link
-              key={item.to}
-              to={item.to}
-              className="whitespace-nowrap rounded-full px-3 py-1.5 text-xs text-muted-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground"
-              data-active={isActive(item.to) || undefined}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
 
         <main
           className={cn(
