@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { User } from "./types";
@@ -87,6 +88,26 @@ export const useAuthStore = create<AuthState>()(
     },
   ),
 );
+
+/**
+ * True once the persisted auth state has been rehydrated from localStorage.
+ *
+ * The login-blink bug: on a hard refresh the route gates ran their redirect
+ * check while the store still held its initial null state — a logged-in user
+ * bounced to /login for a frame and back. Gates must not decide anything
+ * until this is true.
+ */
+export function useAuthHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => useAuthStore.persist.hasHydrated());
+  useEffect(() => {
+    if (useAuthStore.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+    return useAuthStore.persist.onFinishHydration(() => setHydrated(true));
+  }, []);
+  return hydrated;
+}
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;

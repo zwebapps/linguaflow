@@ -27,6 +27,28 @@ import type {
 export type SpeakingMode = "auto" | "hold";
 export type SpeakingPhase = "idle" | "listening" | "sending" | "replying";
 
+/** End-of-session feedback, aggregated over every scored turn. */
+type SessionSummary = {
+  turns: number;
+  overall: number;
+  grammar: number;
+  fluency: number;
+  corrections: { original: string; suggestion: string; explanation: string }[];
+};
+
+function summarise(turnScores: SpeakingStreamScores[]): SessionSummary {
+  const n = Math.max(1, turnScores.length);
+  const avg = (pick: (s: SpeakingStreamScores) => number) =>
+    turnScores.reduce((a, s) => a + pick(s), 0) / n;
+  return {
+    turns: turnScores.length,
+    overall: avg((s) => s.overall),
+    grammar: avg((s) => s.grammar),
+    fluency: avg((s) => s.fluency),
+    corrections: turnScores.flatMap((s) => s.corrections).slice(0, 12),
+  };
+}
+
 /**
  * Voice-activity detection tuning.
  *
@@ -100,6 +122,11 @@ export function SpeakingSession({
   const [usage, setUsage] = useState<SpeakingStreamUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [micDenied, setMicDenied] = useState(false);
+  const [turn, setTurn] = useState(1);
+  const [totalTurns, setTotalTurns] = useState(10);
+  const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const turnScoresRef = useRef<SpeakingStreamScores[]>([]);
+  const completeRef = useRef(false);
 
   const sessionRef = useRef(false);
   const modeRef = useRef<SpeakingMode>("auto");
@@ -161,6 +188,11 @@ export function SpeakingSession({
     setScores(null);
     setUsage(null);
     setError(null);
+    // A different scenario is a different role-play: fresh thread, fresh count.
+    setThreadId(null);
+    setTurn(1);
+    setSummary(null);
+    turnScoresRef.current = [];
   }, [scenarioId]);
 
   const speakOpening = useCallback(() => {
@@ -260,18 +292,28 @@ export function SpeakingSession({
         await streamSpeakingTurn(
           form,
           {
-            onStart: (d) => setThreadId(d.thread_id),
+            onStart: (d) => {
+              setThreadId(d.thread_id);
+              if (d.turn) setTurn(d.turn);
+              if (d.total_turns) setTotalTurns(d.total_turns);
+            },
             onStatus: (d) => setStatusLabel(d.label),
             onTranscript: (d) => setLastTranscript(d.text),
             onToken: (d) => setAssistantReply((prev) => prev + d.text),
-            onScores: (d) => setScores(d),
+            onScores: (d) => {
+              setScores(d);
+              turnScoresRef.current.push(d);
+            },
             onAudio: (d) => {
               setPhase("replying");
               setStatusLabel(null);
               playback = playSpeakingAudio(d, mutedRef.current);
             },
             onUsage: (d) => setUsage(d),
-            onDone: () => setStatusLabel(null),
+            onDone: (d) => {
+              setStatusLabel(null);
+              completeRef.current = d.session_complete === true;
+            },
             onError: (d) => {
               setError(d.message);
               setStatusLabel(null);
@@ -289,14 +331,24 @@ export function SpeakingSession({
       // otherwise the next turn transcribes the tutor's own voice.
       await playback;
 
-      if (sessionRef.current && modeRef.current === "auto" && streamRef.current) {
+      if (completeRef.current) {
+        // Ten questions asked and answered — the session is over. Close the
+        // mic and hand over the aggregated feedback.
+        completeRef.current = false;
+        setSummary(summarise(turnScoresRef.current));
+        sessionRef.current = false;
+        setSessionActive(false);
+        releaseStream();
+        setPhase("idle");
+        setStatusLabel(null);
+      } else if (sessionRef.current && modeRef.current === "auto" && streamRef.current) {
         beginListeningRef.current();
       } else {
         setPhase("idle");
         setStatusLabel(null);
       }
     },
-    [scenarioId, cefrLevel, threadId],
+    [scenarioId, cefrLevel, threadId, releaseStream],
   );
 
   /** Open a fresh recorder on the live stream and start the VAD loop. */
@@ -325,7 +377,7 @@ export function SpeakingSession({
         void sendTurn(blob);
       } else if (sessionRef.current && modeRef.current === "auto") {
         // Nothing worth sending (noise blip) — quietly keep listening.
-        beginListening();
+        beginListeningRef.current();
       } else {
         setPhase("idle");
         if (modeRef.current === "hold") setError("I couldn't hear you — try speaking a bit longer.");
@@ -364,6 +416,13 @@ export function SpeakingSession({
 
   const startConversation = useCallback(async () => {
     if (!(await openMic())) return;
+    // Every Start is a fresh 10-question session — a finished thread would
+    // otherwise wrap up again on its very first turn.
+    setThreadId(null);
+    setTurn(1);
+    setSummary(null);
+    turnScoresRef.current = [];
+    completeRef.current = false;
     sessionRef.current = true;
     setSessionActive(true);
     // Natural opening: the tutor greets first, then the floor is yours.
@@ -374,7 +433,9 @@ export function SpeakingSession({
         mutedRef.current,
       );
     }
-    if (sessionRef.current) beginListening();
+    // Via the ref: the awaits above straddle renders, and a stale closure here
+    // would carry the previous session's thread id into the first turn.
+    if (sessionRef.current) beginListeningRef.current();
   }, [beginListening, openMic, scenario?.opening]);
 
   const endConversation = useCallback(() => {
@@ -394,7 +455,7 @@ export function SpeakingSession({
   const holdStart = useCallback(async () => {
     if (!(await openMic())) return;
     sessionRef.current = true;
-    beginListening();
+    beginListeningRef.current();
     // In hold mode the button is the VAD: mark the turn voiced immediately.
     vadRef.current.voiced = true;
     vadRef.current.calibrating = false;
@@ -441,9 +502,16 @@ export function SpeakingSession({
         </div>
 
         {scenario && (
-          <p className="rounded-xl border border-border bg-card/80 px-4 py-3 text-sm italic text-muted-foreground">
-            „{scenario.opening}&ldquo;
-          </p>
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-card/80 px-4 py-3">
+            <p className="min-w-0 flex-1 truncate text-sm italic text-muted-foreground">
+              „{scenario.opening}&ldquo;
+            </p>
+            {sessionActive && (
+              <Badge variant="secondary" className="shrink-0">
+                Question {turn} / {totalTurns}
+              </Badge>
+            )}
+          </div>
         )}
 
         {micDenied && (
@@ -484,6 +552,37 @@ export function SpeakingSession({
       </div>
 
       <aside className="space-y-4">
+        {summary && (
+          <div className="neo-card panel space-y-3 rounded-xl border-2 border-primary/30 p-4">
+            <div className="flex items-center gap-2">
+              <p className="label-mono">Session complete 🎉</p>
+              <Badge variant="secondary">{summary.turns} turns</Badge>
+            </div>
+            <ul className="space-y-1 text-sm">
+              <li>Overall · {Math.round(summary.overall * 100)}%</li>
+              <li>Grammar · {Math.round(summary.grammar * 100)}%</li>
+              <li>Fluency · {Math.round(summary.fluency * 100)}%</li>
+            </ul>
+            {summary.corrections.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  What to practise next — from this session:
+                </p>
+                {summary.corrections.map((c, i) => (
+                  <div key={i} className="border-t border-border pt-2 text-xs">
+                    <p>
+                      <span className="line-through opacity-70">{c.original}</span> → {c.suggestion}
+                    </p>
+                    <p className="text-muted-foreground">{c.explanation}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Button size="sm" variant="secondary" onClick={() => setSummary(null)}>
+              Dismiss
+            </Button>
+          </div>
+        )}
         <div className="neo-card panel rounded-xl p-4">
           <p className="label-mono mb-2">Your last turn</p>
           {busy && !lastTranscript && <Spinner label={statusLabel ?? "Processing…"} />}

@@ -400,7 +400,12 @@ export type SpeakingCorrection = {
   explanation: string;
 };
 
-export type SpeakingStreamStart = { thread_id: string; scenario: string };
+export type SpeakingStreamStart = {
+  thread_id: string;
+  scenario: string;
+  turn?: number;
+  total_turns?: number;
+};
 export type SpeakingStreamStatus = {
   stage: "transcribing" | "thinking" | "scoring" | "speaking";
   label: string;
@@ -436,5 +441,9 @@ export type SpeakingStreamUsage = {
   cost_usd: number;
   latency_ms: number;
 };
-export type SpeakingStreamDone = { message_id: string; thread_id: string };
+export type SpeakingStreamDone = {
+  message_id: string;
+  thread_id: string;
+  session_complete?: boolean;
+};
 export type SpeakingStreamError = { code: string; message: string };
