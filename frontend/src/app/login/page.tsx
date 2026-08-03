@@ -14,6 +14,8 @@ import type { AuthResponse } from "@/lib/types";
 import { ErrorAlert } from "@/components/shared/error-alert";
 import { Spinner } from "@/components/shared/spinner";
 import { LinguaFlowLogo } from "@/components/linguaflow-logo";
+import { AuthMarketingPanel } from "@/components/marketing/auth-marketing-panel";
+import { LanguageWordmarkStrip } from "@/components/marketing/language-wordmarks";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -50,7 +52,9 @@ export default function LoginPage() {
   });
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="flex min-h-screen bg-background">
+      <AuthMarketingPanel />
+      <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
       <div className="panel w-full max-w-md rounded-xl p-8">
         <LinguaFlowLogo className="mb-6" />
         <h1 className="font-display text-2xl font-semibold">Welcome back</h1>
@@ -116,6 +120,10 @@ export default function LoginPage() {
             Ops portal
           </Link>
         </p>
+      </div>
+        <div className="mt-8 w-full max-w-md lg:hidden">
+          <LanguageWordmarkStrip title="Supported languages" />
+        </div>
       </div>
     </div>
   );
