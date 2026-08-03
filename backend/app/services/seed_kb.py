@@ -47,7 +47,12 @@ async def seed_one_document(db: AsyncSession, spec: SeedDoc) -> bool:
         raise FileNotFoundError(f"Seed file missing: {path}")
 
     existing = (
-        await db.execute(select(Document).where(Document.title == spec.title))
+        await db.execute(
+            select(Document).where(
+                Document.title == spec.title,
+                Document.language == getattr(spec, "language", "de"),
+            )
+        )
     ).scalar_one_or_none()
     if existing is not None:
         log.info("seed_kb_skip_existing", title=spec.title, status=existing.status)
@@ -57,6 +62,7 @@ async def seed_one_document(db: AsyncSession, spec: SeedDoc) -> bool:
         title=spec.title,
         source_type="md",
         storage_path=str(path),
+        language=getattr(spec, "language", "de"),
         cefr_level=spec.cefr_level,
         skill=spec.skill,
         status="pending",

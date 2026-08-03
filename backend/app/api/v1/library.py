@@ -98,10 +98,20 @@ async def list_library(
     level: Annotated[CEFR | None, Query()] = None,
     skill: Annotated[str | None, Query(max_length=20)] = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
+    # Defaults to what the learner is studying. Explicit so a learner studying
+    # two languages can browse the other one without switching their profile.
+    language: Annotated[str | None, Query(max_length=5)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     cursor: str | None = None,
 ) -> LibraryPage:
-    stmt = select(Document).where(Document.status == "ready")
+    # Language is applied ALWAYS, never optionally. Content is implicitly
+    # single-language everywhere else in the product, so an unfiltered library
+    # would quietly serve German readers to a Spanish learner — a wrong answer
+    # that looks like a working feature.
+    stmt = select(Document).where(
+        Document.status == "ready",
+        Document.language == (language or user.target_language),
+    )
     if level is not None:
         stmt = stmt.where(Document.cefr_level == level)
     if skill is not None:
@@ -133,7 +143,14 @@ async def get_library_document(
 ) -> LibraryDetail:
     document = (
         await db.execute(
-            select(Document).where(Document.id == document_id, Document.status == "ready")
+            # Language-checked on the detail route too: a document id is
+            # guessable, and "not in your language" should read as not found
+            # rather than handing over another course's material.
+            select(Document).where(
+                Document.id == document_id,
+                Document.status == "ready",
+                Document.language == user.target_language,
+            )
         )
     ).scalar_one_or_none()
     if document is None:

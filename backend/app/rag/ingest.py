@@ -171,6 +171,9 @@ async def _ingest_rss_feed(db: AsyncSession, document: Document, parsed: ParsedD
             title=item.get("title") or url,
             source_type="web",
             source_url=url,
+            # Inherited from the parent: a feed's children teach the same
+            # language as the feed, never the 'de' column default.
+            language=document.language,
             cefr_level=document.cefr_level,
             skill=document.skill,
             collection=document.collection,

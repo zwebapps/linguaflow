@@ -168,7 +168,12 @@ async def search(payload: SearchRequest, db: DbSession, user: CurrentUser) -> Se
     await enforce_rate_limit(str(user.id), bucket="tools")
 
     result = await rag_retriever.retrieve(
-        db, payload.query, cefr_level=payload.cefr_level, skill=payload.skill, k=payload.k
+        db,
+        payload.query,
+        cefr_level=payload.cefr_level,
+        skill=payload.skill,
+        k=payload.k,
+        language=user.target_language,
     )
     return SearchResponse(
         query=result.query,

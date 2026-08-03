@@ -177,6 +177,11 @@ async def stream_tutor_turn(
             message,
             strategy=strategy,
             document_id=context.get("document_id"),
+            # Ground ONLY in the language being learned. Without this the tutor
+            # could cite a German grammar chunk while answering a Spanish
+            # question — a confidently wrong answer, the worst failure mode for
+            # a teaching product.
+            language=getattr(user, "target_language", None),
         )
         passages = [
             {"id": c.id, "title": c.title, "text": c.text, "snippet": c.snippet}

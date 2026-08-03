@@ -29,6 +29,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -115,6 +116,18 @@ class Document(Base, TimestampMixin):
     content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     content_md: Mapped[str | None] = mapped_column(Text)  # extracted text, for Reading Mode
 
+    # Which target language this material TEACHES. Distinct from the learner's
+    # native language: a Turkish speaker learning Spanish reads Spanish
+    # documents. Content without a language cannot be served to anyone, so this
+    # is NOT NULL rather than an optional hint.
+    language: Mapped[str] = mapped_column(
+        String(5),
+        default="de",
+        server_default="de",
+        nullable=False,
+        index=True,
+        comment="Target language this content teaches (ISO 639-1).",
+    )
     cefr_level: Mapped[str | None] = mapped_column(String(2), index=True)
     skill: Mapped[str | None] = mapped_column(String(20), index=True)
     collection: Mapped[str] = mapped_column(
@@ -125,6 +138,18 @@ class Document(Base, TimestampMixin):
     error: Mapped[str | None] = mapped_column(Text)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     reading_minutes: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (
+        # The library feed is (language, status, created_at desc) and level
+        # filtering is (language, cefr_level). One composite beats three
+        # single-column indexes the planner has to combine.
+        Index(
+            "ix_documents_language_status_created",
+            "language",
+            "status",
+            text("created_at DESC"),
+        ),
+    )
 
     chunks: Mapped[list[Chunk]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
@@ -166,6 +191,16 @@ class FeedSource(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     url: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    # Everything this feed ingests inherits this language, so a German news feed
+    # can never leak into a Spanish learner's library.
+    language: Mapped[str] = mapped_column(
+        String(5),
+        default="de",
+        server_default="de",
+        nullable=False,
+        index=True,
+        comment="Target language this content teaches (ISO 639-1).",
+    )
     cefr_level: Mapped[str | None] = mapped_column(String(2))
     skill: Mapped[str | None] = mapped_column(String(20))
     poll_interval_minutes: Mapped[int] = mapped_column(Integer, default=1440, nullable=False)
@@ -223,6 +258,16 @@ class Vocabulary(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     lemma: Mapped[str] = mapped_column(String(120), nullable=False)
+    # The language the word IS. A learner studying two languages can hold "der
+    # Tisch" and "la mesa" at once, and each must review in its own deck.
+    language: Mapped[str] = mapped_column(
+        String(5),
+        default="de",
+        server_default="de",
+        nullable=False,
+        index=True,
+        comment="Target language this content teaches (ISO 639-1).",
+    )
     article: Mapped[str | None] = mapped_column(String(10))
     plural: Mapped[str | None] = mapped_column(String(120))
     pos: Mapped[str | None] = mapped_column(String(20))
@@ -240,7 +285,12 @@ class Vocabulary(Base, TimestampMixin):
     )
 
     __table_args__ = (
-        UniqueConstraint("user_id", "lemma", name="uq_vocab_user_lemma"),
+        # LANGUAGE is part of a word's identity. Without it a learner studying
+        # German and Spanish could not save both "sin" (without) and "sin"
+        # (Spanish), and the IntegrityError handler in vocab.py would silently
+        # hand back the wrong-language entry as if it were a duplicate.
+        UniqueConstraint("user_id", "language", "lemma", name="uq_vocab_user_lang_lemma"),
+        Index("ix_vocabulary_user_language", "user_id", "language"),
     )
 
 

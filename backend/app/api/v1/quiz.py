@@ -145,6 +145,9 @@ async def generate(
         cefr_level=payload.cefr_level,
         k=_QUIZ_RETRIEVAL_K,
         document_id=str(payload.document_id) if payload.document_id else None,
+        # A quiz built from another language's corpus would test the wrong
+        # language entirely.
+        language=user.target_language,
     )
     passages, sources = _passages_and_sources(result)
 

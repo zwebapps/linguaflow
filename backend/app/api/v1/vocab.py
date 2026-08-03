@@ -99,11 +99,23 @@ def _decode_cursor(cursor: str) -> tuple[datetime, str]:
         raise ValidationError("Invalid pagination cursor.") from exc
 
 
-async def _find_by_lemma(db: DbSession, user_id: Any, lemma: str) -> Vocabulary | None:
+async def _find_by_lemma(
+    db: DbSession, user_id: Any, lemma: str, language: str
+) -> Vocabulary | None:
+    """Existing entry for this lemma IN THIS LANGUAGE.
+
+    Language is part of the identity of a word, not a detail of it. Without it,
+    saving Spanish "sin" would collide with German "sin"-spelled entries and one
+    learner's decks would bleed into each other.
+    """
     stmt = (
         select(Vocabulary)
         .options(selectinload(Vocabulary.card))
-        .where(Vocabulary.user_id == user_id, func.lower(Vocabulary.lemma) == lemma.lower())
+        .where(
+            Vocabulary.user_id == user_id,
+            Vocabulary.language == language,
+            func.lower(Vocabulary.lemma) == lemma.lower(),
+        )
     )
     return (await db.execute(stmt)).scalar_one_or_none()
 
@@ -157,10 +169,12 @@ async def list_vocab(
     limit: int = Query(default=20, ge=1, le=100),
     cursor: str | None = Query(default=None),
 ) -> VocabListResponse:
+    # Scoped to the language being studied: a learner doing German AND Spanish
+    # holds "der Tisch" and "la mesa" at once, and each deck must review alone.
     stmt = (
         select(Vocabulary)
         .options(selectinload(Vocabulary.card))
-        .where(Vocabulary.user_id == user.id)
+        .where(Vocabulary.user_id == user.id, Vocabulary.language == user.target_language)
     )
     if status_filter is not None:
         stmt = stmt.where(Vocabulary.status == status_filter)
@@ -184,7 +198,7 @@ async def list_vocab(
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_vocab(payload: CreateVocabRequest, user: CurrentUser, db: DbSession) -> VocabOut:
-    existing = await _find_by_lemma(db, user.id, payload.lemma)
+    existing = await _find_by_lemma(db, user.id, payload.lemma, user.target_language)
     if existing is not None:
         return _vocab_view(existing)
 
@@ -203,6 +217,9 @@ async def create_vocab(payload: CreateVocabRequest, user: CurrentUser, db: DbSes
 
     vocab = Vocabulary(
         user_id=user.id,
+        # Stamped from the learner's current target so a word saved while
+        # studying Spanish never surfaces in a German review session.
+        language=user.target_language,
         lemma=_display_lemma(payload.lemma, article) if enriched else payload.lemma,
         article=article,
         plural=enriched.get("plural") if enriched else None,
@@ -220,9 +237,9 @@ async def create_vocab(payload: CreateVocabRequest, user: CurrentUser, db: DbSes
         # Idempotency race: another request created the same (user, lemma) row
         # between our pre-check and this insert. Roll back and return that row.
         await db.rollback()
-        existing = await _find_by_lemma(db, user.id, payload.lemma) or await _find_by_lemma(
-            db, user.id, vocab.lemma
-        )
+        existing = await _find_by_lemma(
+            db, user.id, payload.lemma, user.target_language
+        ) or await _find_by_lemma(db, user.id, vocab.lemma, user.target_language)
         if existing is not None:
             return _vocab_view(existing)
         raise

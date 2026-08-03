@@ -52,6 +52,10 @@ async def retrieve(
     strategy: str | None = None,
     document_id: str | None = None,
     collection: str | None = None,
+    # The language of the material to ground in. None keeps the pre-multilingual
+    # behaviour (search everything) so internal callers that have no learner
+    # context — evals, admin reindex — are unaffected.
+    language: str | None = None,
 ) -> SearchResult:
     started = time.perf_counter()
     strategy = strategy or settings.SEARCH_STRATEGY
@@ -63,11 +67,13 @@ async def retrieve(
 
     try:
         dense_hits = await _dense_search(
+            db,
             query,
             collection=collection,
             cefr_level=cefr_level,
             skill=skill,
             document_id=document_id,
+            language=language,
             k=top_k,
         )
     except Exception as exc:
@@ -85,6 +91,7 @@ async def retrieve(
                 cefr_level=cefr_level,
                 skill=skill,
                 document_id=document_id,
+                language=language,
                 k=top_k,
             )
         except Exception as exc:
@@ -104,27 +111,58 @@ async def retrieve(
 
 
 async def _dense_search(
+    db: AsyncSession,
     query: str,
     *,
     collection: str,
     cefr_level: str | None,
     skill: str | None,
     document_id: str | None,
+    language: str | None,
     k: int,
 ) -> list[RetrievedChunk]:
     vector = await get_embedder().embed_query(query)
     if not vector:
         return []
 
-    # `contracts.VectorStore.search` has no `document_id` filter — pull a wider
-    # pool and post-filter here rather than widen the frozen interface for one
-    # caller's need.
-    pool = max(k * 5, 50) if document_id else k
+    # `contracts.VectorStore.search` has no `document_id` or `language` filter —
+    # pull a wider pool and post-filter here rather than widen the frozen
+    # interface for one caller's need.
+    #
+    # Language would ideally be a per-language COLLECTION (`kb_de`, `kb_es`):
+    # the index would then hold one language, which both removes this
+    # post-filter and stops cross-language neighbours competing for the top-k.
+    # That is an ingestion-side change and a bigger move than this one; the
+    # post-filter is exact in the meantime.
+    narrowing = document_id or language
+    pool = max(k * 5, 50) if narrowing else k
     store = get_vector_store()
     hits = await store.search(collection, vector, k=pool, cefr_level=cefr_level, skill=skill)
     if document_id:
         hits = [h for h in hits if h.document_id == str(document_id)]
+    if language and hits:
+        hits = await _keep_language(db, hits, language)
     return hits[:k]
+
+
+async def _keep_language(
+    db: AsyncSession, hits: list[RetrievedChunk], language: str
+) -> list[RetrievedChunk]:
+    """Drop hits whose document is in another language.
+
+    One query over the ids already retrieved, not one per hit — the pool is
+    bounded by `k * 5`, so this stays a single round-trip regardless of corpus
+    size. Order is preserved: the vector store ranked these, and re-sorting here
+    would silently discard that ranking.
+    """
+    ids = {h.document_id for h in hits if h.document_id}
+    if not ids:
+        return hits
+    rows = await db.execute(
+        select(Document.id).where(Document.id.in_(ids), Document.language == language)
+    )
+    keep = {str(r[0]) for r in rows}
+    return [h for h in hits if h.document_id in keep]
 
 
 # ── Keyword half ──────────────────────────────────────────────────────────────
@@ -138,6 +176,7 @@ async def _keyword_search(
     cefr_level: str | None,
     skill: str | None,
     document_id: str | None,
+    language: str | None,
     k: int,
 ) -> list[RetrievedChunk]:
     stmt = (
@@ -145,6 +184,8 @@ async def _keyword_search(
         .join(Document, Document.id == Chunk.document_id)
         .where(Document.collection == collection)
     )
+    if language:
+        stmt = stmt.where(Document.language == language)
     if cefr_level:
         stmt = stmt.where(Chunk.cefr_level == cefr_level)
     if skill:

@@ -70,7 +70,12 @@ class _FakeSession:
 
 
 def _make_user() -> SimpleNamespace:
-    return SimpleNamespace(id=uuid.uuid4(), cefr_level="A2")
+    # `target_language` is NOT NULL on the real User, so a fake without it is a
+    # state that cannot exist. Quiz generation reads it to scope retrieval to the
+    # language being learned; leaving it off here would push the production code
+    # into a defensive `getattr(..., None)`, and None means "search every
+    # language" — the exact bug the scoping exists to prevent.
+    return SimpleNamespace(id=uuid.uuid4(), cefr_level="A2", target_language="de")
 
 
 def _contains_key(obj: Any, key: str) -> bool:

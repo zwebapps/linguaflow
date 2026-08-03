@@ -98,7 +98,13 @@ def build_tools(db: AsyncSession, user: User) -> list[BaseTool]:
         query: str, cefr_level: str | None = None, skill: str | None = None
     ) -> dict[str, Any] | str:
         try:
-            result = await rag_retriever.retrieve(db, query, cefr_level=cefr_level, skill=skill)
+            result = await rag_retriever.retrieve(
+                db,
+                query,
+                cefr_level=cefr_level,
+                skill=skill,
+                language=user.target_language,
+            )
         except Exception as exc:  # retrieve() is documented to never raise — stay defensive anyway
             log.warning("tool_search_kb_failed", query=query, error=str(exc))
             return (
@@ -161,7 +167,11 @@ def build_tools(db: AsyncSession, user: User) -> list[BaseTool]:
             existing = (
                 await db.execute(
                     select(Vocabulary).where(
-                        Vocabulary.user_id == user.id, Vocabulary.lemma == lemma
+                        Vocabulary.user_id == user.id,
+                        # Per-language: the same spelling can be a different
+                        # word in another language the learner also studies.
+                        Vocabulary.language == user.target_language,
+                        Vocabulary.lemma == lemma,
                     )
                 )
             ).scalar_one_or_none()
@@ -175,6 +185,7 @@ def build_tools(db: AsyncSession, user: User) -> list[BaseTool]:
             )
             vocab = Vocabulary(
                 user_id=user.id,  # from the closure — never from a tool argument
+                language=user.target_language,  # likewise: not a tool argument
                 lemma=enrichment.get("lemma") or lemma,
                 article=enrichment.get("article"),
                 plural=enrichment.get("plural"),

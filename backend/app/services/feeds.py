@@ -113,6 +113,7 @@ async def poll_feed(db: AsyncSession, feed: FeedSource) -> dict[str, Any]:
             title=str(item.get("title") or url)[:500],
             source_type="web",
             source_url=str(url),
+            language=feed.language,
             cefr_level=feed.cefr_level,
             skill=feed.skill,
             status="pending",
