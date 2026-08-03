@@ -37,6 +37,13 @@ uvicorn app.main:app --reload --port 8000
 First boot runs Alembic migrations, seeds the AI routing table, creates the admin
 account, and (with an API key present) ingests a starter German knowledge base.
 
+**2b. Ingestion worker** (required — uploads stay `pending / 0 chunks` forever
+without it; the API only *enqueues* to Redis, this process consumes):
+
+```bash
+python -m app.workers.ingest
+```
+
 **3. Frontend** (:3010):
 
 ```bash
