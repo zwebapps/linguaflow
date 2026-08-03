@@ -1,0 +1,54 @@
+# Render Blueprint — DeutschFlow API.
+#
+# Render hosts ONLY this container; state lives on the free tiers it talks to
+# (Supabase Postgres, Upstash Redis, Qdrant Cloud) and the frontend on Vercel.
+# See DEPLOYMENT.md.
+#
+# Secrets are declared `sync: false` on purpose: Render prompts for them once
+# in the dashboard and stores them there, so nothing secret is ever committed.
+# The values to paste are in backend/deploy/.env.cloudrun (gitignored).
+
+services:
+  - type: web
+    name: deutschflow-api
+    runtime: docker
+    plan: free
+    region: frankfurt # nearest to the Supabase (eu-west-1) + Qdrant (eu-central-1) tiers
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # ── Safe to commit ────────────────────────────────────────────────
+      - key: APP_ENV
+        value: production
+      - key: EMBEDDING_BACKEND
+        # `local` would pull torch (~2 GB) — impossible on a 512 MB free plan.
+        value: openrouter
+      - key: SEED_ON_BOOT
+        value: "true"
+      - key: EMAIL_SINK
+        value: console
+      - key: ADMIN_EMAIL
+        value: admin@linguaflow.dev
+      # Point these at your Vercel URL once the frontend is deployed.
+      - key: CORS_ORIGINS
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+
+      # ── Prompted in the dashboard, never in git ───────────────────────
+      - key: DATABASE_URL # Supabase SESSION POOLER + postgresql+asyncpg://
+        sync: false
+      - key: REDIS_URL # Upstash, rediss:// (TLS)
+        sync: false
+      - key: QDRANT_URL # cluster URL WITH :6333
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: JWT_SECRET # 32+ chars or the app refuses to boot
+        sync: false
+      - key: ADMIN_PASSWORD # 12+ chars, not the default
+        sync: false

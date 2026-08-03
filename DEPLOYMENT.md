@@ -30,7 +30,43 @@ production they point at the cloud — the code never changes.
 | Google Cloud | project + billing enabled | — | (host) |
 | vercel.com | import repo | — | (frontend) |
 
-## 1. Backend → Cloud Run
+## 1. Backend → Render (no credit card) **or** Cloud Run
+
+### Render — recommended when you don't want to attach billing
+
+Render's free web service needs no payment method. The repo ships
+`render.yaml`, so:
+
+1. Push this repo to GitHub (Render deploys from it).
+2. Render dashboard → **New → Blueprint** → pick the repo → it reads
+   `render.yaml` and proposes `deutschflow-api` (Docker, free, Frankfurt).
+3. Render prompts for the `sync: false` env vars — paste them from
+   `backend/deploy/.env.cloudrun` (that file is gitignored and holds your real
+   values). `CORS_ORIGINS`/`PUBLIC_APP_URL` can start as
+   `https://localhost:3000` and be corrected after the Vercel deploy.
+4. Apply. First boot migrates, bootstraps the admin, and seeds the corpus.
+
+Measured: the image runs at **~310 MB under a 512 MB cap** — fits the free
+plan with headroom, provided `EMBEDDING_BACKEND=openrouter` (the `local`
+backend pulls ~2 GB of torch and cannot fit).
+
+Free-plan behaviour: the service **sleeps after 15 idle minutes**, so the
+first request afterwards takes ~50 s. Ingestion (uploads, RSS) only runs while
+the service is awake — fine in practice, since uploads happen while an admin
+is using the app.
+
+### Cloud Run — if you have an open billing account
+
+Requires an **open** billing account linked to the project (free quota still
+demands a card on file):
+
+```bash
+gcloud billing projects link <PROJECT_ID> --billing-account=<ACCOUNT_ID>
+```
+
+Then the section below.
+
+## 1b. Cloud Run details
 
 Secrets live in `backend/deploy/.env.cloudrun` (**gitignored** — never commit
 it). Fill it from `backend/deploy/.env.cloudrun` comments; three formats bite:
