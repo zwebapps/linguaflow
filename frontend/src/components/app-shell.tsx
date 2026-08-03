@@ -204,7 +204,11 @@ export function AppShell({
           </div>
         </header>
 
-        <nav className="flex gap-1 overflow-x-auto border-b border-border bg-muted/30 px-3 py-2 md:hidden">
+        {/* shrink-0 is load-bearing: this sits in a h-screen flex column, and
+            without it tall page content compressed the strip to a ~16px sliver
+            with the pills crushed to 12px — "navigation" that read as a stray
+            border. The links scroll horizontally; the BAR must never shrink. */}
+        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-muted/30 px-3 py-2 md:hidden">
           {flatNav.map((item) => (
             <Link
               key={item.to}

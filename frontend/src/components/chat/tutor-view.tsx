@@ -9,6 +9,13 @@ import { StatusIndicator } from "@/components/chat/status-indicator";
 import { ThreadSidebar } from "@/components/chat/thread-sidebar";
 import { ErrorAlert } from "@/components/shared/error-alert";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { exportThread } from "@/components/chat/export-thread";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api";
 import { streamChat } from "@/lib/chat-stream";
@@ -137,9 +144,23 @@ export function TutorView({ threadId }: { threadId?: string }) {
       subtitle="Ask in your language or English · answers cite your library · pick up past chats anytime"
       actions={
         threadId ? (
-          <Button variant="secondary" size="sm" className="gap-1.5" disabled>
-            <Download className="size-3.5" /> Export chat
-          </Button>
+          // A real control now — this shipped as a permanently `disabled`
+          // button while the export endpoint sat fully built and tested
+          // behind it, so the one visible "Export chat" affordance was a decoy.
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="secondary" size="sm" className="gap-1.5">
+                <Download className="size-3.5" /> Export chat
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {(["pdf", "md", "json", "csv"] as const).map((f) => (
+                <DropdownMenuItem key={f} onClick={() => exportThread(threadId, f)}>
+                  Export {f.toUpperCase()}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : undefined
       }
     >

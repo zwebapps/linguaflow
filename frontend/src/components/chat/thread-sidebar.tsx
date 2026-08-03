@@ -9,7 +9,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiDownload, apiFetch } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import { exportThread } from "@/components/chat/export-thread";
 import type { ChatThreadSummary, Paginated } from "@/lib/types";
 
 export function ThreadSidebar({
@@ -30,15 +31,7 @@ export function ThreadSidebar({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["chat-threads"] }),
   });
 
-  async function exportThread(id: string, format: string) {
-    const blob = await apiDownload(`/chat/threads/${id}/export?format=${format}`);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `thread-${id}.${format}`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  
 
   return (
     <div className="panel flex h-full flex-col rounded-lg p-3">
@@ -65,12 +58,21 @@ export function ThreadSidebar({
             </Link>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-8 shrink-0 opacity-0 group-hover:opacity-100">
+                {/* Visible by default: hover-reveal only from md up, because touch
+                    devices have no hover and the export button simply did not
+                    exist for them. */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+                >
                   <Download className="size-3.5" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                {(["json", "csv", "md"] as const).map((f) => (
+                {/* All four backend formats — pdf was built and tested server-side
+                    but never offered here. */}
+                {(["pdf", "md", "json", "csv"] as const).map((f) => (
                   <DropdownMenuItem key={f} onClick={() => exportThread(t.id, f)}>
                     Export {f.toUpperCase()}
                   </DropdownMenuItem>
