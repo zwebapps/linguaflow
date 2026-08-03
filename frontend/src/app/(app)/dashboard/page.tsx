@@ -11,6 +11,7 @@ import {
   VitalityDailyGoal,
   VitalityStatTile,
 } from "@/components/learner/vitality-ui";
+import { LearningBackdrop } from "@/components/learning-backdrop";
 import { StatCard } from "@/components/shared/stat-card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -61,6 +62,9 @@ export default function DashboardPage() {
       }
       actions={user?.cefr_level && <CefrBadge level={user.cefr_level} />}
     >
+      <div className="relative min-h-full">
+      <LearningBackdrop />
+      <div className="relative z-10">
       {isError && (
         <ErrorAlert
           message={error instanceof Error ? error.message : "Could not load dashboard"}
@@ -143,6 +147,8 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+      </div>
+      </div>
     </AppShell>
   );
 }

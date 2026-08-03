@@ -1,12 +1,7 @@
-import { AdminTheme } from "@/components/admin/admin-theme";
-
-const ADMIN_THEME_BOOT = `(function(){try{document.documentElement.setAttribute("data-app-theme","obsidian");document.documentElement.style.colorScheme="dark";}catch(e){}})();`;
-
 export default function AdminRootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      <script dangerouslySetInnerHTML={{ __html: ADMIN_THEME_BOOT }} />
-      <AdminTheme>{children}</AdminTheme>
-    </>
-  );
+  // The console used to force the dark "obsidian" tokens with its own boot
+  // script. It now follows the SAME stored theme as the learner app (light
+  // "classroom" by default) — the root layout's boot script already applies
+  // it, and the sidebar offers the same switcher the learner shell has.
+  return children;
 }

@@ -15,6 +15,7 @@ import { ErrorAlert } from "@/components/shared/error-alert";
 import { Spinner } from "@/components/shared/spinner";
 import { LinguaFlowLogo } from "@/components/linguaflow-logo";
 import { AuthMarketingPanel } from "@/components/marketing/auth-marketing-panel";
+import { LearningBackdrop } from "@/components/learning-backdrop";
 import { LanguageWordmarkStrip } from "@/components/marketing/language-wordmarks";
 
 export default function LoginPage() {
@@ -54,8 +55,9 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen bg-background">
       <AuthMarketingPanel />
-      <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
-      <div className="panel w-full max-w-md rounded-xl p-8">
+      <div className="relative flex flex-1 flex-col items-center justify-center px-4 py-10">
+      <LearningBackdrop />
+      <div className="panel relative z-10 w-full max-w-md rounded-xl p-8">
         <LinguaFlowLogo className="mb-6" />
         <h1 className="font-display text-2xl font-semibold">Welcome back</h1>
         <p className="mt-1 text-sm text-muted-foreground">

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useAuthStore } from "@/lib/auth-store";
 import { LinguaFlowLogo } from "@/components/linguaflow-logo";
 import { AdminRuntimeStatus } from "@/components/admin/admin-runtime-status";
+import { LearnerThemeSwitcher } from "@/components/learner-theme-switcher";
 import { Button } from "@/components/ui/button";
 
 const adminNav = [
@@ -46,8 +47,10 @@ export function AdminShell({
               <Link
                 key={item.to}
                 to={item.to}
-                className={`flex items-center gap-2 rounded-md px-3 py-2.5 text-sm ${
-                  active ? "bg-data/15 text-data" : "text-muted-foreground hover:bg-data/10"
+                className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm transition-colors ${
+                  active
+                    ? "neo-inset font-medium text-sidebar-accent-foreground"
+                    : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground"
                 }`}
               >
                 <item.icon className="size-4" />
@@ -57,13 +60,16 @@ export function AdminShell({
           })}
         </nav>
         <AdminRuntimeStatus />
-        <div className="mt-auto space-y-2 border-t border-border p-4 text-xs">
+        <div className="mt-auto shrink-0">
+          <LearnerThemeSwitcher />
+        </div>
+        <div className="space-y-2 border-t border-border p-4 text-xs">
           <p className="text-sm font-medium">{user?.display_name}</p>
           <p className="text-muted-foreground">{user?.email}</p>
           <Button
             variant="outline"
             size="sm"
-            className="w-full border-data/40"
+            className="w-full"
             onClick={() => {
               logout();
               window.location.href = "/admin/login";
