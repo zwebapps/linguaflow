@@ -111,21 +111,39 @@ export function primeSpeechVoices(): void {
   speechSynthesis.addEventListener("voiceschanged", load);
 }
 
-export function playSpeakingAudio(payload: SpeakingStreamAudio, muted: boolean): void {
-  if (muted) return;
+/**
+ * Speak the tutor's reply. Resolves when playback actually ENDS — the
+ * hands-free conversation loop must not reopen the mic while the tutor is
+ * still talking, or the tutor transcribes itself.
+ */
+export function playSpeakingAudio(payload: SpeakingStreamAudio, muted: boolean): Promise<void> {
+  if (muted) return Promise.resolve();
   if (payload.use_browser_tts && payload.text) {
-    const u = new SpeechSynthesisUtterance(payload.text);
-    u.lang = payload.lang ?? "de-DE";
-    const de = germanVoice();
-    if (de) u.voice = de;
-    // Slightly slower than default: this is a language learner listening, and the
-    // platform default rate is brisk for someone at A1/A2.
-    u.rate = 0.95;
-    speechSynthesis.speak(u);
-    return;
+    return new Promise((resolve) => {
+      const u = new SpeechSynthesisUtterance(payload.text ?? "");
+      u.lang = payload.lang ?? "de-DE";
+      const de = germanVoice();
+      if (de) u.voice = de;
+      // Slightly slower than default: this is a language learner listening, and
+      // the platform default rate is brisk for someone at A1/A2.
+      u.rate = 0.95;
+      u.onend = () => resolve();
+      u.onerror = () => resolve();
+      speechSynthesis.speak(u);
+    });
   }
   if (payload.data_uri) {
-    const audio = new Audio(payload.data_uri);
-    void audio.play();
+    return new Promise((resolve) => {
+      const audio = new Audio(payload.data_uri ?? undefined);
+      audio.onended = () => resolve();
+      audio.onerror = () => resolve();
+      void audio.play().catch(() => resolve());
+    });
   }
+  return Promise.resolve();
+}
+
+/** Cut any in-flight tutor speech (used when the learner ends the session). */
+export function cancelSpeakingAudio(): void {
+  if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
 }

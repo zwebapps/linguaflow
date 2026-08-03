@@ -11,7 +11,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { playSpeakingAudio, primeSpeechVoices, streamSpeakingTurn } from "@/lib/speaking-stream";
+import {
+  cancelSpeakingAudio,
+  playSpeakingAudio,
+  primeSpeechVoices,
+  streamSpeakingTurn,
+} from "@/lib/speaking-stream";
 import type {
   CefrLevel,
   SpeakingScenario,
@@ -19,7 +24,53 @@ import type {
   SpeakingStreamUsage,
 } from "@/lib/types";
 
-type Phase = "idle" | "recording" | "sending";
+export type SpeakingMode = "auto" | "hold";
+export type SpeakingPhase = "idle" | "listening" | "sending" | "replying";
+
+/**
+ * Voice-activity detection tuning.
+ *
+ * The old UI was push-to-hold: release too early and the last word was cut,
+ * hold wrong and "No audio captured". The conversation loop instead keeps the
+ * mic open and detects turns itself: the first ~600 ms of each listening
+ * window calibrates the room's noise floor, speech starts when RMS clears the
+ * floor for MIN_SPEECH_MS, and the turn auto-sends after END_SILENCE_MS of
+ * quiet. Numbers are deliberately forgiving — a learner pausing to think
+ * mid-sentence must NOT be cut off, so the end-of-turn silence is long.
+ */
+const CALIBRATE_MS = 600;
+const MIN_SPEECH_MS = 300; // voiced this long → it's a real turn, not a cough
+const END_SILENCE_MS = 1400; // pause this long after speaking → turn is over
+const MAX_TURN_MS = 45_000; // hard stop so a stuck VAD can't record forever
+const MIN_TURN_BYTES = 4096; // ignore blobs that can't contain speech
+
+type VadState = {
+  calibrating: boolean;
+  calibrateStart: number;
+  noiseSum: number;
+  noiseSamples: number;
+  noiseFloor: number;
+  voiced: boolean;
+  speechMs: number;
+  silenceMs: number;
+  turnStart: number;
+  last: number;
+};
+
+function freshVad(now: number): VadState {
+  return {
+    calibrating: true,
+    calibrateStart: now,
+    noiseSum: 0,
+    noiseSamples: 0,
+    noiseFloor: 4,
+    voiced: false,
+    speechMs: 0,
+    silenceMs: 0,
+    turnStart: now,
+    last: now,
+  };
+}
 
 export function SpeakingSession({
   scenarios,
@@ -35,7 +86,10 @@ export function SpeakingSession({
   );
   const scenario = scenarios.find((s) => s.id === scenarioId) ?? scenarios[0];
 
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [mode, setMode] = useState<SpeakingMode>("auto");
+  const [phase, setPhase] = useState<SpeakingPhase>("idle");
+  const [sessionActive, setSessionActive] = useState(false);
+  const [userSpeaking, setUserSpeaking] = useState(false);
   const [muted, setMuted] = useState(false);
   const [level, setLevel] = useState(0);
   const [statusLabel, setStatusLabel] = useState<string | null>(null);
@@ -47,45 +101,50 @@ export function SpeakingSession({
   const [error, setError] = useState<string | null>(null);
   const [micDenied, setMicDenied] = useState(false);
 
+  const sessionRef = useRef(false);
+  const modeRef = useRef<SpeakingMode>("auto");
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number>(0);
+  const vadRef = useRef<VadState>(freshVad(0));
+  const discardRef = useRef(false);
+  const mutedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  // sendTurn (defined first) and beginListening (defined after) call each
+  // other across turns; the ref breaks the circular capture without stale
+  // closures.
+  const beginListeningRef = useRef<() => void>(() => {});
+
+  modeRef.current = mode;
+  mutedRef.current = muted;
 
   const stopMeter = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = 0;
     setLevel(0);
-  }, []);
-
-  const startMeter = useCallback((stream: MediaStream) => {
-    const ctx = new AudioContext();
-    const source = ctx.createMediaStreamSource(stream);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    source.connect(analyser);
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    const tick = () => {
-      analyser.getByteFrequencyData(data);
-      let sum = 0;
-      for (let i = 0; i < data.length; i++) sum += data[i];
-      setLevel(Math.min(100, (sum / data.length / 255) * 140));
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    tick();
+    setUserSpeaking(false);
   }, []);
 
   const releaseStream = useCallback(() => {
     stopMeter();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    void audioCtxRef.current?.close().catch(() => undefined);
+    audioCtxRef.current = null;
+    analyserRef.current = null;
   }, [stopMeter]);
 
   useEffect(
     () => () => {
+      sessionRef.current = false;
+      discardRef.current = true;
+      if (recorderRef.current?.state === "recording") recorderRef.current.stop();
       releaseStream();
       abortRef.current?.abort();
+      cancelSpeakingAudio();
     },
     [releaseStream],
   );
@@ -106,104 +165,258 @@ export function SpeakingSession({
 
   const speakOpening = useCallback(() => {
     if (!scenario?.opening || muted) return;
-    playSpeakingAudio(
+    void playSpeakingAudio(
       { use_browser_tts: true, text: scenario.opening, lang: "de-DE", data_uri: null },
       muted,
     );
   }, [scenario?.opening, muted]);
 
-  async function sendRecording(blob: Blob) {
-    setPhase("sending");
-    setStatusLabel("Uploading…");
-    setAssistantReply("");
-    setScores(null);
-    setError(null);
-
-    const form = new FormData();
-    form.append("audio", blob, "turn.webm");
-    form.append("scenario", scenarioId);
-    form.append("cefr_level", cefrLevel);
-    form.append("want_audio", "true");
-    if (threadId) form.append("thread_id", threadId);
-
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-
-    try {
-      await streamSpeakingTurn(
-        form,
-        {
-          onStart: (d) => setThreadId(d.thread_id),
-          onStatus: (d) => setStatusLabel(d.label),
-          onTranscript: (d) => setLastTranscript(d.text),
-          onToken: (d) => setAssistantReply((prev) => prev + d.text),
-          onScores: (d) => setScores(d),
-          onAudio: (d) => playSpeakingAudio(d, muted),
-          onUsage: (d) => setUsage(d),
-          onDone: () => {
-            setStatusLabel(null);
-            setPhase("idle");
-          },
-          onError: (d) => {
-            setError(d.message);
-            setStatusLabel(null);
-            setPhase("idle");
-          },
-        },
-        ac.signal,
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Speaking turn failed");
-      setPhase("idle");
-      setStatusLabel(null);
+  /** RMS 0–100 from the time-domain signal — steadier than frequency averages. */
+  const readRms = useCallback((): number => {
+    const analyser = analyserRef.current;
+    if (!analyser) return 0;
+    const data = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i] - 128) / 128;
+      sum += v * v;
     }
-  }
+    return Math.min(100, Math.sqrt(sum / data.length) * 260);
+  }, []);
 
-  async function startRecording() {
+  const endTurn = useCallback(() => {
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+  }, []);
+
+  const vadTick = useCallback(() => {
+    const rms = readRms();
+    setLevel(rms);
+    const now = performance.now();
+    const vad = vadRef.current;
+    const dt = Math.min(200, now - vad.last);
+    vad.last = now;
+
+    if (vad.calibrating) {
+      vad.noiseSum += rms;
+      vad.noiseSamples += 1;
+      if (now - vad.calibrateStart >= CALIBRATE_MS) {
+        vad.noiseFloor = vad.noiseSamples ? vad.noiseSum / vad.noiseSamples : 4;
+        vad.calibrating = false;
+      }
+      rafRef.current = requestAnimationFrame(vadTick);
+      return;
+    }
+
+    // Adaptive thresholds: clearly above the room, with hysteresis so a
+    // trailing consonant doesn't flap the state machine.
+    const startTh = Math.max(vad.noiseFloor * 2.2, 7);
+    const endTh = Math.max(vad.noiseFloor * 1.5, 5);
+
+    if (rms >= startTh) {
+      vad.speechMs += dt;
+      vad.silenceMs = 0;
+      if (!vad.voiced && vad.speechMs >= MIN_SPEECH_MS) {
+        vad.voiced = true;
+        setUserSpeaking(true);
+      }
+    } else if (rms < endTh) {
+      if (vad.voiced) vad.silenceMs += dt;
+      else vad.speechMs = Math.max(0, vad.speechMs - dt);
+    }
+
+    if (modeRef.current === "auto" && vad.voiced) {
+      if (vad.silenceMs >= END_SILENCE_MS || now - vad.turnStart >= MAX_TURN_MS) {
+        setUserSpeaking(false);
+        endTurn();
+        return; // recorder.onstop drives what happens next
+      }
+    }
+
+    rafRef.current = requestAnimationFrame(vadTick);
+  }, [endTurn, readRms]);
+
+  const sendTurn = useCallback(
+    async (blob: Blob) => {
+      setPhase("sending");
+      setStatusLabel("Transcribing…");
+      setAssistantReply("");
+      setScores(null);
+      setError(null);
+
+      const form = new FormData();
+      form.append("audio", blob, "turn.webm");
+      form.append("scenario", scenarioId);
+      form.append("cefr_level", cefrLevel);
+      form.append("want_audio", "true");
+      if (threadId) form.append("thread_id", threadId);
+
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      let playback: Promise<void> = Promise.resolve();
+      try {
+        await streamSpeakingTurn(
+          form,
+          {
+            onStart: (d) => setThreadId(d.thread_id),
+            onStatus: (d) => setStatusLabel(d.label),
+            onTranscript: (d) => setLastTranscript(d.text),
+            onToken: (d) => setAssistantReply((prev) => prev + d.text),
+            onScores: (d) => setScores(d),
+            onAudio: (d) => {
+              setPhase("replying");
+              setStatusLabel(null);
+              playback = playSpeakingAudio(d, mutedRef.current);
+            },
+            onUsage: (d) => setUsage(d),
+            onDone: () => setStatusLabel(null),
+            onError: (d) => {
+              setError(d.message);
+              setStatusLabel(null);
+            },
+          },
+          ac.signal,
+        );
+      } catch (e) {
+        if (!ac.signal.aborted) {
+          setError(e instanceof Error ? e.message : "Speaking turn failed");
+        }
+      }
+
+      // Wait for the tutor to FINISH talking before the mic reopens —
+      // otherwise the next turn transcribes the tutor's own voice.
+      await playback;
+
+      if (sessionRef.current && modeRef.current === "auto" && streamRef.current) {
+        beginListeningRef.current();
+      } else {
+        setPhase("idle");
+        setStatusLabel(null);
+      }
+    },
+    [scenarioId, cefrLevel, threadId],
+  );
+
+  /** Open a fresh recorder on the live stream and start the VAD loop. */
+  const beginListening = useCallback(() => {
+    const stream = streamRef.current;
+    if (!stream || !sessionRef.current) return;
+
+    chunksRef.current = [];
+    discardRef.current = false;
+    vadRef.current = freshVad(performance.now());
+    setUserSpeaking(false);
+
+    const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : undefined;
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    recorderRef.current = rec;
+    rec.ondataavailable = (e) => {
+      if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+    rec.onstop = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+      const voiced = vadRef.current.voiced;
+      const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
+      if (discardRef.current) return;
+      if (voiced && blob.size >= MIN_TURN_BYTES) {
+        void sendTurn(blob);
+      } else if (sessionRef.current && modeRef.current === "auto") {
+        // Nothing worth sending (noise blip) — quietly keep listening.
+        beginListening();
+      } else {
+        setPhase("idle");
+        if (modeRef.current === "hold") setError("I couldn't hear you — try speaking a bit longer.");
+      }
+    };
+    rec.start(250);
+    setPhase("listening");
+    rafRef.current = requestAnimationFrame(vadTick);
+  }, [sendTurn, vadTick]);
+  beginListeningRef.current = beginListening;
+
+  const openMic = useCallback(async (): Promise<boolean> => {
+    if (streamRef.current) return true;
     setError(null);
     setMicDenied(false);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Echo cancellation + noise suppression are what make hands-free viable:
+      // without them the tutor's own TTS and room noise leak into the turn.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
       streamRef.current = stream;
-      startMeter(stream);
-      chunksRef.current = [];
-      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : undefined;
-      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-      recorderRef.current = rec;
-      rec.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      rec.onstop = () => {
-        releaseStream();
-        const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
-        if (blob.size > 0) void sendRecording(blob);
-        else {
-          setPhase("idle");
-          setError("No audio captured — hold the button while you speak.");
-        }
-      };
-      rec.start();
-      setPhase("recording");
+      const ctx = new AudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      audioCtxRef.current = ctx;
+      analyserRef.current = analyser;
+      return true;
     } catch {
       setMicDenied(true);
-      setPhase("idle");
+      return false;
     }
-  }
+  }, []);
 
-  function stopRecording() {
+  const startConversation = useCallback(async () => {
+    if (!(await openMic())) return;
+    sessionRef.current = true;
+    setSessionActive(true);
+    // Natural opening: the tutor greets first, then the floor is yours.
+    if (scenario?.opening && !mutedRef.current) {
+      setPhase("replying");
+      await playSpeakingAudio(
+        { use_browser_tts: true, text: scenario.opening, lang: "de-DE", data_uri: null },
+        mutedRef.current,
+      );
+    }
+    if (sessionRef.current) beginListening();
+  }, [beginListening, openMic, scenario?.opening]);
+
+  const endConversation = useCallback(() => {
+    sessionRef.current = false;
+    setSessionActive(false);
+    discardRef.current = true;
+    abortRef.current?.abort();
+    cancelSpeakingAudio();
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
-    else setPhase("idle");
-  }
+    releaseStream();
+    setPhase("idle");
+    setStatusLabel(null);
+  }, [releaseStream]);
+
+  // Hold-to-talk fallback (noisy rooms, no-headset laptops). No session state:
+  // each press is one turn, and the scenario picker stays usable between turns.
+  const holdStart = useCallback(async () => {
+    if (!(await openMic())) return;
+    sessionRef.current = true;
+    beginListening();
+    // In hold mode the button is the VAD: mark the turn voiced immediately.
+    vadRef.current.voiced = true;
+    vadRef.current.calibrating = false;
+    setUserSpeaking(true);
+  }, [beginListening, openMic]);
+
+  const holdStop = useCallback(() => {
+    setUserSpeaking(false);
+    endTurn();
+  }, [endTurn]);
 
   const busy = phase === "sending";
-  const recording = phase === "recording";
 
   return (
     <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,340px)]">
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
-          <Select value={scenarioId} onValueChange={setScenarioId} disabled={busy || recording}>
+          <Select
+            value={scenarioId}
+            onValueChange={setScenarioId}
+            disabled={sessionActive || busy}
+          >
             <SelectTrigger className="w-full max-w-xs rounded-xl">
               <SelectValue placeholder="Scenario" />
             </SelectTrigger>
@@ -221,7 +434,7 @@ export function SpeakingSession({
             size="sm"
             className="rounded-xl"
             onClick={speakOpening}
-            disabled={muted}
+            disabled={muted || sessionActive}
           >
             Hear opening
           </Button>
@@ -244,18 +457,29 @@ export function SpeakingSession({
         <VoiceCanvas
           cefrLevel={cefrLevel}
           tutorName={scenario?.title ?? "Tutor"}
-          listening={recording}
+          mode={mode}
+          sessionActive={sessionActive}
+          phase={phase}
+          userSpeaking={userSpeaking}
           level={level}
           muted={muted}
-          busy={busy}
           statusLabel={statusLabel}
           onToggleMute={() => setMuted((m) => !m)}
-          onRecordStart={() => void startRecording()}
-          onRecordStop={stopRecording}
+          onToggleMode={() => {
+            endConversation();
+            setMode((m) => (m === "auto" ? "hold" : "auto"));
+          }}
+          onSessionStart={() => void startConversation()}
+          onSessionEnd={endConversation}
+          onHoldStart={() => void holdStart()}
+          onHoldStop={holdStop}
         />
 
         <p className="text-center text-xs text-muted-foreground">
-          Push and hold to speak · release to send · transcribed and answered in your target language
+          {mode === "auto"
+            ? "Start the conversation, then just talk — your turn sends itself when you pause."
+            : "Push and hold to speak · release to send."}{" "}
+          Transcribed and answered in your target language.
         </p>
       </div>
 
@@ -266,7 +490,9 @@ export function SpeakingSession({
           {lastTranscript ? (
             <p className="text-sm">{lastTranscript}</p>
           ) : (
-            !busy && <p className="text-sm text-muted-foreground">Record a turn to see your transcript.</p>
+            !busy && (
+              <p className="text-sm text-muted-foreground">Say something to see your transcript.</p>
+            )
           )}
         </div>
 
