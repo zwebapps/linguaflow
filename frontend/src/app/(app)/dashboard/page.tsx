@@ -12,6 +12,7 @@ import {
   VitalityStatTile,
 } from "@/components/learner/vitality-ui";
 import { StatCard } from "@/components/shared/stat-card";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
@@ -109,8 +110,37 @@ export default function DashboardPage() {
         </div>
       )}
       {data && !vitality && (
-        <div className="space-y-6">
-          <StatCard label="Vocabulary" value={String(data.counters.vocab_total)} icon={BookOpen} />
+        <div className="mx-auto max-w-5xl space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard
+              label="Words saved"
+              value={String(data.counters.vocab_total)}
+              hint={`${data.counters.vocab_mastered} mastered`}
+              icon={BookOpen}
+            />
+            <StatCard label="Streak" value={`${data.counters.streak_days}d`} hint="Keep showing up" icon={Flame} />
+            <StatCard label="Quizzes" value={String(data.counters.quizzes_taken)} icon={MessagesSquare} />
+            <StatCard label="Writing pieces" value={String(data.counters.writings_submitted)} icon={PenLine} />
+          </div>
+          <div className="panel rounded-lg p-5">
+            <p className="label-mono">Daily goal</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              You&apos;re {goalPct}% toward your {goalMin}-minute daily goal.
+            </p>
+            <Progress value={goalPct} className="mt-3 h-2" />
+            <Button variant="link" className="mt-2 h-auto p-0 text-primary" asChild>
+              <Link to="/analytics">View details →</Link>
+            </Button>
+          </div>
+          <div className="panel flex flex-wrap items-center justify-between gap-4 rounded-lg p-5">
+            <div>
+              <p className="font-display text-lg font-semibold">Ask the tutor</p>
+              <p className="text-sm text-muted-foreground">Clear answers tied to your library texts</p>
+            </div>
+            <Button asChild className="rounded-xl shadow-sm">
+              <Link to="/tutor">Open tutor</Link>
+            </Button>
+          </div>
         </div>
       )}
     </AppShell>
