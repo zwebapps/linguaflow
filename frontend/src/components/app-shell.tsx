@@ -22,6 +22,7 @@ import { useAppThemeId } from "@/hooks/use-app-theme";
 import { useSidebarBrandingExpanded } from "@/hooks/use-sidebar-branding";
 import { LinguaFlowLogo } from "@/components/linguaflow-logo";
 import { LearnerThemeSwitcher } from "@/components/learner-theme-switcher";
+import { VerifyEmailBanner } from "@/components/verify-email-banner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -177,6 +178,7 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <VerifyEmailBanner />
         <header
           className={cn(
             "sticky top-0 z-20 px-5 py-4 backdrop-blur md:px-8",

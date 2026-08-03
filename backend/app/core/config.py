@@ -26,6 +26,23 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60 * 24 * 7
 
+    # Where verification links and OAuth round-trips send the browser.
+    PUBLIC_APP_URL: str = "http://localhost:3010"
+    # Email delivery. "console" logs the message and writes it to var/outbox/
+    # so dev can click the link; wire a real provider here before production.
+    EMAIL_SINK: Literal["console"] = "console"
+    VERIFY_TOKEN_TTL_HOURS: int = 24
+
+    # ── OAuth sign-in (Google / Microsoft). Empty = the provider's button is
+    # hidden and its endpoints answer 503. Fill these from the provider console:
+    # Google Cloud Console → OAuth client; Azure Portal → App registration.
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    MICROSOFT_CLIENT_ID: str = ""
+    MICROSOFT_CLIENT_SECRET: str = ""
+    # Base URL the provider redirects back to (this API's public origin).
+    OAUTH_CALLBACK_BASE: str = "http://localhost:8000"
+
     # ── Database ──────────────────────────────────────────────────────────────
     DATABASE_URL: str = (
         "postgresql+asyncpg://linguaflow:linguaflow@localhost:5442/linguaflow"

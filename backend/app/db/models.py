@@ -94,6 +94,17 @@ class User(Base, TimestampMixin):
     )
     onboarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # ── Account provenance + email verification ──────────────────────────────
+    # `password` accounts verify by emailed link; OAuth accounts (google/
+    # microsoft) arrive verified by their provider. The token is stored HASHED
+    # (SHA-256) with a TTL — a leaked DB row must not be a working link.
+    auth_provider: Mapped[str] = mapped_column(
+        String(20), default="password", server_default="password", nullable=False
+    )
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verify_token_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    verify_token_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     @property
     def is_admin(self) -> bool:
         return self.role == "admin"

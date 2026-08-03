@@ -14,6 +14,7 @@ from app.api.v1 import (
     flashcards,
     library,
     materials,
+    oauth,
     quiz,
     speaking,
     tools,
@@ -26,6 +27,7 @@ api_router = APIRouter(prefix="/api/v1")
 
 # Auth + profile
 api_router.include_router(auth.router, tags=["auth"])
+api_router.include_router(oauth.router, tags=["auth"])
 # AI
 api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
 api_router.include_router(tools.router, prefix="/tools", tags=["tools"])

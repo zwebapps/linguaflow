@@ -14,6 +14,7 @@ import type { AuthResponse } from "@/lib/types";
 import { ErrorAlert } from "@/components/shared/error-alert";
 import { Spinner } from "@/components/shared/spinner";
 import { LinguaFlowLogo } from "@/components/linguaflow-logo";
+import { OAuthButtons } from "@/components/oauth-buttons";
 import { AuthMarketingPanel } from "@/components/marketing/auth-marketing-panel";
 import { LearningBackdrop } from "@/components/learning-backdrop";
 import { LanguageWordmarkStrip } from "@/components/marketing/language-wordmarks";
@@ -109,6 +110,7 @@ export default function LoginPage() {
             {login.isPending ? <Spinner label="Signing in…" /> : opsAccount ? "Use Ops sign-in above" : "Sign in"}
           </Button>
         </form>
+        <div className="mt-5"><OAuthButtons intent="sign in" /></div>
         <p className="mt-4 text-center text-sm text-muted-foreground">
           No account?{" "}
           <Link to="/register" className="relative z-10 font-medium text-primary underline underline-offset-2 hover:text-primary/90">

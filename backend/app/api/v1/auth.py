@@ -118,6 +118,7 @@ class AuthUser(BaseModel):
     role: str
     cefr_level: str
     onboarded: bool
+    email_verified: bool
 
 
 class TokenResponse(BaseModel):
@@ -139,6 +140,7 @@ class MeResponse(BaseModel):
     native_language: str
     target_language: str
     onboarded: bool
+    email_verified: bool
 
 
 def _auth_user(user: User) -> AuthUser:
@@ -149,6 +151,7 @@ def _auth_user(user: User) -> AuthUser:
         role=user.role,
         cefr_level=user.cefr_level,
         onboarded=user.onboarded_at is not None,
+        email_verified=user.email_verified_at is not None,
     )
 
 
@@ -166,6 +169,7 @@ def _me_view(user: User) -> MeResponse:
         native_language=user.native_language or 'en',
         target_language=user.target_language or 'de',
         onboarded=user.onboarded_at is not None,
+        email_verified=user.email_verified_at is not None,
     )
 
 
@@ -180,6 +184,51 @@ def _hash_password_or_422(raw: str) -> str:
             "Password is too long (max 72 bytes).",
             details=[{"field": "password", "issue": str(exc)}],
         ) from exc
+
+
+# ── Email verification ────────────────────────────────────────────────────────
+# The token the learner clicks is opaque random bytes; only its SHA-256 lands
+# in the DB (a leaked row must not be a working link). Verification is a nudge,
+# not a wall: signup still logs the learner straight in, and the app shows a
+# banner until the link is clicked.
+
+
+def _hash_token(token: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def issue_verification_email(db: DbSession, user: User) -> None:
+    import secrets
+    from datetime import timedelta
+
+    from app.core.config import settings
+    from app.services.mailer import send_email
+
+    token = secrets.token_urlsafe(32)
+    user.verify_token_hash = _hash_token(token)
+    user.verify_token_expires = datetime.now(UTC) + timedelta(
+        hours=settings.VERIFY_TOKEN_TTL_HOURS
+    )
+    await db.commit()
+
+    link = f"{settings.PUBLIC_APP_URL}/verify-email?token={token}"
+    await send_email(
+        to=user.email,
+        subject="Verify your email — LinguaFlow",
+        text=(
+            f"Hallo {user.display_name or ''}!\n\n"
+            "Welcome to LinguaFlow. Confirm your email address by opening this link:\n\n"
+            f"{link}\n\n"
+            f"The link is valid for {settings.VERIFY_TOKEN_TTL_HOURS} hours. "
+            "If you didn't create this account, you can ignore this message."
+        ),
+    )
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str = Field(..., min_length=16, max_length=128)
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -207,8 +256,41 @@ async def register(payload: RegisterRequest, db: DbSession) -> TokenResponse:
     await db.refresh(user)
 
     log.info("user_registered", user_id=str(user.id))
+    await issue_verification_email(db, user)
     token = create_access_token(user_id=str(user.id), email=user.email, role=user.role)
     return TokenResponse(access_token=token, user=_auth_user(user))
+
+
+@router.post("/auth/verify-email")
+async def verify_email(payload: VerifyEmailRequest, db: DbSession) -> dict[str, Any]:
+    user = (
+        await db.execute(
+            select(User).where(User.verify_token_hash == _hash_token(payload.token))
+        )
+    ).scalar_one_or_none()
+    if user is None:
+        raise Unauthorized("That verification link is invalid or was already used.")
+    if user.verify_token_expires and user.verify_token_expires < datetime.now(UTC):
+        raise Unauthorized("That verification link has expired — request a new one.")
+
+    user.email_verified_at = datetime.now(UTC)
+    user.verify_token_hash = None
+    user.verify_token_expires = None
+    await db.commit()
+    log.info("email_verified", user_id=str(user.id))
+    return {"verified": True, "email": user.email}
+
+
+@router.post("/auth/resend-verification", status_code=status.HTTP_202_ACCEPTED)
+async def resend_verification(user: CurrentUser, db: DbSession) -> dict[str, Any]:
+    from app.core.cache import enforce_rate_limit
+
+    if user.email_verified_at is not None:
+        return {"sent": False, "reason": "already_verified"}
+    # Tight bucket: verification mail is the classic outbound-spam vector.
+    await enforce_rate_limit(str(user.id), bucket="verify_email", limit=3)
+    await issue_verification_email(db, user)
+    return {"sent": True}
 
 
 @router.post("/auth/login")

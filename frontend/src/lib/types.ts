@@ -42,6 +42,7 @@ export type User = {
   daily_goal_minutes?: number;
   gloss_langs?: string[];
   onboarded: boolean;
+  email_verified?: boolean;
 };
 
 export type AuthResponse = {

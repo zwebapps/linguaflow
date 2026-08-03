@@ -13,6 +13,7 @@ import type { AuthResponse } from "@/lib/types";
 import { ErrorAlert } from "@/components/shared/error-alert";
 import { Spinner } from "@/components/shared/spinner";
 import { LinguaFlowLogo } from "@/components/linguaflow-logo";
+import { OAuthButtons } from "@/components/oauth-buttons";
 import { AuthMarketingPanel } from "@/components/marketing/auth-marketing-panel";
 import { LanguageWordmarkStrip } from "@/components/marketing/language-wordmarks";
 
@@ -87,6 +88,7 @@ export default function RegisterPage() {
             {register.isPending ? <Spinner label="Creating…" /> : "Register"}
           </Button>
         </form>
+        <div className="mt-5"><OAuthButtons intent="sign up" /></div>
         <p className="mt-4 text-center text-sm text-muted-foreground">
           Already have an account?{" "}
           <Link to="/login" className="text-data hover:underline">
