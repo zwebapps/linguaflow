@@ -11,6 +11,13 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -24,35 +31,57 @@ import type { AdminExperiment, AdminExperimentResults } from "@/lib/types";
 
 const DEFAULT_NAME = "retrieval_strategy_v1";
 
-function pct(hybrid: number, dense: number, arm: "hybrid" | "dense") {
-  const h = Math.max(0, hybrid);
-  const d = Math.max(0, dense);
-  const t = h + d || 1;
-  return Math.round((arm === "hybrid" ? h / t : d / t) * 100);
+/** Share of total traffic for one arm, over however many arms exist. */
+function pctOf(arms: Record<string, number>, arm: string) {
+  const total = Object.values(arms).reduce((s, w) => s + Math.max(0, w), 0) || 1;
+  return Math.round((Math.max(0, arms[arm] ?? 0) / total) * 100);
 }
 
-export function ExperimentsPanel({ experiments }: { experiments: AdminExperiment[] }) {
+export function ExperimentsPanel({
+  experiments,
+  availableArms,
+}: {
+  experiments: AdminExperiment[];
+  /** What an arm may be — served by the API from the retriever's own list, so
+   *  this dropdown can never offer a strategy the backend would reject. */
+  availableArms: string[];
+}) {
   const queryClient = useQueryClient();
   const selected =
     experiments.find((e) => e.name === DEFAULT_NAME) ?? experiments[0] ?? null;
 
   const [name, setName] = useState(selected?.name ?? DEFAULT_NAME);
   const [enabled, setEnabled] = useState(selected?.enabled ?? false);
-  const [hybridW, setHybridW] = useState(selected?.arms.hybrid ?? 0.5);
-  const [denseW, setDenseW] = useState(selected?.arms.dense ?? 0.5);
+  // Dynamic: one entry per arm, strategy chosen from a dropdown. The previous
+  // panel hardcoded exactly hybrid+dense, so a third strategy in the backend
+  // was unreachable from the UI.
+  const [arms, setArms] = useState<Record<string, number>>(
+    selected?.arms ?? { hybrid: 0.5, dense: 0.5 },
+  );
   const [description, setDescription] = useState(selected?.description ?? "");
 
   useEffect(() => {
     if (!selected) return;
     setName(selected.name);
     setEnabled(selected.enabled);
-    setHybridW(selected.arms.hybrid ?? 0.5);
-    setDenseW(selected.arms.dense ?? 0.5);
+    setArms(selected.arms);
     setDescription(selected.description ?? "");
   }, [selected]);
 
-  const hybridPct = useMemo(() => pct(hybridW, denseW, "hybrid"), [hybridW, denseW]);
-  const densePct = useMemo(() => pct(hybridW, denseW, "dense"), [hybridW, denseW]);
+  const unusedArms = useMemo(
+    () => availableArms.filter((a) => !(a in arms)),
+    [availableArms, arms],
+  );
+
+  function renameArm(from: string, to: string) {
+    setArms((prev) => {
+      if (to === from || to in prev) return prev;
+      const next: Record<string, number> = {};
+      // Preserve row order — a rename must not shuffle the list under the admin.
+      for (const [k, w] of Object.entries(prev)) next[k === from ? to : k] = w;
+      return next;
+    });
+  }
 
   const results = useQuery({
     queryKey: ["admin-experiment-results", name],
@@ -66,7 +95,7 @@ export function ExperimentsPanel({ experiments }: { experiments: AdminExperiment
         method: "PUT",
         json: {
           enabled,
-          arms: { hybrid: hybridW, dense: denseW },
+          arms,
           description: description.trim() || null,
         },
       }),
@@ -110,33 +139,61 @@ export function ExperimentsPanel({ experiments }: { experiments: AdminExperiment
             <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="Enable experiment" />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <Label>Hybrid weight</Label>
-                <span className="font-mono text-muted-foreground">{hybridPct}% traffic</span>
+          <div className="space-y-3">
+            {Object.entries(arms).map(([arm, weight]) => (
+              <div key={arm} className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:items-center">
+                <Select value={arm} onValueChange={(v) => renameArm(arm, v)}>
+                  <SelectTrigger aria-label={`Strategy for this arm`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* The current strategy plus whatever is not already an arm —
+                        two rows can never select the same strategy. */}
+                    {[arm, ...unusedArms].map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>weight</span>
+                    <span className="font-mono">{pctOf(arms, arm)}% traffic</span>
+                  </div>
+                  <Slider
+                    value={[weight]}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onValueChange={(v) => setArms((prev) => ({ ...prev, [arm]: v[0] }))}
+                  />
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={Object.keys(arms).length <= 1}
+                  onClick={() =>
+                    setArms((prev) => {
+                      const next = { ...prev };
+                      delete next[arm];
+                      return next;
+                    })
+                  }
+                >
+                  Remove
+                </Button>
               </div>
-              <Slider
-                value={[hybridW]}
-                min={0}
-                max={1}
-                step={0.05}
-                onValueChange={(v) => setHybridW(v[0])}
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <Label>Dense weight</Label>
-                <span className="font-mono text-muted-foreground">{densePct}% traffic</span>
-              </div>
-              <Slider
-                value={[denseW]}
-                min={0}
-                max={1}
-                step={0.05}
-                onValueChange={(v) => setDenseW(v[0])}
-              />
-            </div>
+            ))}
+            {unusedArms.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setArms((prev) => ({ ...prev, [unusedArms[0]]: 0.5 }))}
+              >
+                + Add arm ({unusedArms.join(", ")} available)
+              </Button>
+            )}
           </div>
 
           <div className="space-y-1.5">

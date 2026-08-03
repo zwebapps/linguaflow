@@ -31,10 +31,15 @@ log = structlog.get_logger(__name__)
 # running experiment — so it is a constant, not a setting someone tunes casually.
 _BUCKET_SALT = "linguaflow-rag-ab-v1"
 
-# Arms are named by the retrieval strategy they select. Keep these in sync with
-# `settings.SEARCH_STRATEGY`'s allowed values.
+# Arms are named by the retrieval strategy they select. SUPPORTED_STRATEGIES is
+# the single authority — the admin validator and the UI's dropdown both derive
+# from it, so adding a strategy here is the ONLY step that widens the vocabulary
+# everywhere. Keep in sync with `settings.SEARCH_STRATEGY`'s Literal.
 ARM_HYBRID = "hybrid"
 ARM_DENSE = "dense"
+ARM_KEYWORD = "keyword"
+
+SUPPORTED_STRATEGIES: tuple[str, ...] = (ARM_HYBRID, ARM_DENSE, ARM_KEYWORD)
 
 
 @dataclass(slots=True)

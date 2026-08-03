@@ -577,6 +577,9 @@ class ExperimentOut(BaseModel):
 
 class ExperimentsResponse(BaseModel):
     experiments: list[ExperimentOut]
+    # What an arm may be. The admin UI builds its strategy dropdown from this,
+    # so the list has exactly one home (rag/experiments.SUPPORTED_STRATEGIES).
+    available_arms: list[str]
 
 
 class ExperimentUpsertRequest(BaseModel):
@@ -588,7 +591,11 @@ class ExperimentUpsertRequest(BaseModel):
     @field_validator("arms")
     @classmethod
     def _valid_arms(cls, v: dict[str, float]) -> dict[str, float]:
-        allowed = {"hybrid", "dense"}
+        # Derived, not restated: a strategy added to the retriever becomes an
+        # allowed arm here without anyone remembering this validator exists.
+        from app.rag.experiments import SUPPORTED_STRATEGIES
+
+        allowed = set(SUPPORTED_STRATEGIES)
         bad = set(v) - allowed
         if bad:
             raise ValueError(
@@ -632,7 +639,9 @@ async def list_experiments(db: DbSession, admin: CurrentAdmin) -> ExperimentsRes
                 description="Shipped default (not yet saved to the database).",
             )
         )
-    return ExperimentsResponse(experiments=out)
+    from app.rag.experiments import SUPPORTED_STRATEGIES
+
+    return ExperimentsResponse(experiments=out, available_arms=list(SUPPORTED_STRATEGIES))
 
 
 @router.put("/experiments/{name}", response_model=ExperimentOut)

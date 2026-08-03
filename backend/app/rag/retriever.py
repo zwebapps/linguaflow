@@ -82,6 +82,25 @@ async def retrieve(
 
     if strategy == "dense":
         results = dense_hits[:top_k]
+    elif strategy == "keyword":
+        # BM25 alone — the third arm of the classic retrieval ablation
+        # (dense vs keyword vs fusion). The dense pool above is simply unused;
+        # skipping the embed call entirely would need restructuring the happy
+        # path for an experiment arm, which is not worth it.
+        try:
+            results = await _keyword_search(
+                db,
+                query,
+                collection=collection,
+                cefr_level=cefr_level,
+                skill=skill,
+                document_id=document_id,
+                language=language,
+                k=top_k,
+            )
+        except Exception as exc:
+            log.warning("retrieve_keyword_failed", error=str(exc), collection=collection)
+            results = []
     else:
         try:
             keyword_hits = await _keyword_search(

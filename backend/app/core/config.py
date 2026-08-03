@@ -67,7 +67,7 @@ class Settings(BaseSettings):
 
     # ── Retrieval ─────────────────────────────────────────────────────────────
     RETRIEVAL_TOP_K: int = 6
-    SEARCH_STRATEGY: Literal["hybrid", "dense"] = "hybrid"
+    SEARCH_STRATEGY: Literal["hybrid", "dense", "keyword"] = "hybrid"
 
     # ── Limits ────────────────────────────────────────────────────────────────
     RATE_LIMIT_PER_MINUTE: int = 30

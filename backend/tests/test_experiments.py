@@ -170,3 +170,54 @@ def test_ranking_ignores_relevance_score_across_arms() -> None:
     assert stats[0]["arm"] == "hybrid", "the never-empty arm must rank first"
     assert "mean_top_score" not in stats[0], "raw score must not look cross-comparable"
     assert "mean_top_score_within_arm" in stats[0]
+
+
+# ── The keyword arm (dense vs keyword vs hybrid is the classic ablation) ─────
+
+
+def test_supported_strategies_is_the_single_authority() -> None:
+    """The validator and the UI dropdown both derive from this list.
+
+    If it drifts from the retriever's actual branches, an admin can configure an
+    arm that silently falls back to hybrid — an experiment that lies about what
+    it is testing.
+    """
+    from app.rag.experiments import SUPPORTED_STRATEGIES
+
+    assert SUPPORTED_STRATEGIES == ("hybrid", "dense", "keyword")
+
+
+def test_admin_upsert_accepts_a_keyword_arm() -> None:
+    from app.api.v1.admin import ExperimentUpsertRequest
+
+    req = ExperimentUpsertRequest(enabled=True, arms={"keyword": 0.5, "hybrid": 0.5})
+    assert set(req.arms) == {"keyword", "hybrid"}
+
+
+def test_admin_upsert_still_rejects_an_unknown_arm() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from app.api.v1.admin import ExperimentUpsertRequest
+
+    with pytest.raises(ValidationError) as exc:
+        ExperimentUpsertRequest(enabled=True, arms={"quantum": 1.0})
+    # The error must NAME the allowed set — an admin typing into a raw API
+    # should get the vocabulary, not just a refusal.
+    assert "keyword" in str(exc.value)
+
+
+def test_three_arm_assignment_is_stable_and_exhaustive() -> None:
+    from app.rag.experiments import Experiment, assign_arm
+
+    exp = Experiment(
+        name="retrieval_strategy_v1",
+        enabled=True,
+        arms={"hybrid": 1.0, "dense": 1.0, "keyword": 1.0},
+    )
+    seen = {assign_arm(f"user-{i}", experiment=exp)[0] for i in range(300)}
+    assert seen == {"hybrid", "dense", "keyword"}
+    # Stability: the same learner always lands on the same arm.
+    for i in range(20):
+        a = assign_arm(f"user-{i}", experiment=exp)[0]
+        assert all(assign_arm(f"user-{i}", experiment=exp)[0] == a for _ in range(5))

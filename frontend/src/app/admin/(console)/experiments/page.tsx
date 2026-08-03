@@ -11,7 +11,7 @@ import type { AdminExperiment } from "@/lib/types";
 export default function AdminExperimentsPage() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["admin-experiments"],
-    queryFn: () => apiFetch<{ experiments: AdminExperiment[] }>("/admin/experiments"),
+    queryFn: () => apiFetch<{ experiments: AdminExperiment[]; available_arms: string[] }>("/admin/experiments"),
   });
 
   return (
@@ -19,7 +19,10 @@ export default function AdminExperimentsPage() {
       {isError && (
         <ErrorAlert message={error instanceof Error ? error.message : "Failed"} onRetry={() => refetch()} />
       )}
-      {isLoading ? <Skeleton className="h-96 w-full" /> : <ExperimentsPanel experiments={data?.experiments ?? []} />}
+      {isLoading ? <Skeleton className="h-96 w-full" /> : <ExperimentsPanel
+          experiments={data?.experiments ?? []}
+          availableArms={data?.available_arms ?? ["hybrid", "dense"]}
+        />}
     </AdminShell>
   );
 }
