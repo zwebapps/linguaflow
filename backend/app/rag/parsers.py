@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import tempfile
 from dataclasses import dataclass, field
 from ipaddress import ip_address
 from pathlib import Path
@@ -278,6 +279,11 @@ def _parse_html_file_sync(path: str) -> ParsedDoc:
 
 
 async def _parse_web(url: str) -> ParsedDoc:
+    # Google Drive links are an application, not a page — handle them by
+    # rewriting to the direct-download endpoint (or failing with instructions)
+    # instead of ingesting the useless JavaScript shell.
+    if is_google_drive_url(url):
+        return await _parse_google_drive(url)
     html = await _fetch_text(url)
     # readability strips nav/ads/sidebars — the difference between a clean lesson
     # excerpt and a chunk full of "Subscribe to our newsletter".
@@ -285,6 +291,127 @@ async def _parse_web(url: str) -> ParsedDoc:
     title = (doc.title() or "").strip() or url
     text = _html_to_text(doc.summary(html_partial=True))
     return ParsedDoc(title=title, text=text, pages=None)
+
+
+# ── Google Drive ──────────────────────────────────────────────────────────────
+#
+# A pasted Drive link is almost never the document itself. drive.google.com
+# serves a JavaScript application: a FOLDER link renders its file listing only
+# after scripts run (a plain fetch sees the empty shell, so ingesting one gave
+# the learner a "document" that was just the link), and a FILE link renders a
+# preview page around the file, not the file. The only fetchable form is the
+# direct-download endpoint, so file links are rewritten to it and the payload
+# is sniffed (pdf / docx / epub / text); folder links are rejected with
+# instructions, because silently ingesting nothing is worse than an error.
+
+_DRIVE_HOSTS = {"drive.google.com", "docs.google.com", "drive.usercontent.google.com"}
+_DRIVE_FOLDER_RE = re.compile(r"/drive/(?:u/\d+/)?folders/[\w-]+")
+_DRIVE_FILE_RE = re.compile(r"/file/d/([\w-]+)")
+_GOOGLE_DOC_RE = re.compile(r"/document/d/([\w-]+)")
+
+
+def is_google_drive_url(url: str) -> bool:
+    return (urlparse(url).hostname or "").lower() in _DRIVE_HOSTS
+
+
+def _drive_file_id(url: str) -> str | None:
+    parsed = urlparse(url)
+    match = _DRIVE_FILE_RE.search(parsed.path)
+    if match:
+        return match.group(1)
+    if parsed.path in ("/open", "/uc"):
+        ids = parse_qs(parsed.query).get("id")
+        if ids and ids[0].strip():
+            return ids[0].strip()
+    return None
+
+
+def _parse_drive_payload_sync(file_id: str, payload: bytes) -> ParsedDoc:
+    """Sniff a Drive download and reuse the matching file parser.
+
+    Content-type sniffing (magic bytes) rather than trusting an extension we
+    never saw — the download URL carries no filename.
+    """
+    if payload.startswith(b"%PDF"):
+        suffix, parsers = ".pdf", [_parse_pdf_sync]
+    elif payload.startswith(b"PK\x03\x04"):
+        # docx and epub are both zip containers; try both before giving up.
+        suffix, parsers = ".docx", [_parse_docx_sync, _parse_epub_sync]
+    else:
+        head = payload[:2048].lstrip().lower()
+        if head.startswith((b"<!doctype", b"<html")) or b"<html" in head:
+            # An HTML body from the download endpoint is never the file. It is
+            # Google's sign-in page (file not shared publicly) or the
+            # can't-scan-for-viruses interstitial (file too large to fetch
+            # without a confirmation cookie).
+            raise UpstreamError(
+                "Google Drive returned a web page instead of the file. Make sure "
+                "the file is shared as 'Anyone with the link' and is small enough "
+                "for a direct download, or download it and upload it here instead."
+            )
+        text = payload.decode("utf-8", errors="replace")
+        first_line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+        return ParsedDoc(
+            title=first_line[:120] or f"Google Drive file {file_id}",
+            text=text,
+            pages=None,
+        )
+
+    errors: list[str] = []
+    for attempt in parsers:
+        # A real filename gives the parsers a sane title fallback; the id keeps
+        # concurrent imports of different files from colliding.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = str(Path(tmp_dir) / f"google-drive-{file_id}{suffix}")
+            Path(path).write_bytes(payload)
+            try:
+                return attempt(path)
+            except Exception as exc:  # noqa: BLE001 — collected and re-raised below
+                errors.append(f"{attempt.__name__}: {exc}")
+            # epub needs its own extension for ebooklib's zip handling
+            suffix = ".epub"
+    raise ValidationError(
+        "The Google Drive file is not a format this importer can read "
+        f"(supported: PDF, DOCX, EPUB, plain text). Details: {'; '.join(errors)}"
+    )
+
+
+async def _parse_google_drive(url: str) -> ParsedDoc:
+    parsed = urlparse(url)
+
+    if _DRIVE_FOLDER_RE.search(parsed.path):
+        raise ValidationError(
+            "This is a Google Drive FOLDER link — a folder page is a JavaScript "
+            "app with no document text to import. Import each file's own share "
+            "link instead (right-click the file in Drive → Share → 'Anyone with "
+            "the link' → copy link), or download the files and upload them here."
+        )
+
+    gdoc = _GOOGLE_DOC_RE.search(parsed.path)
+    if gdoc:
+        # Google Docs have a first-party plain-text export — far cleaner than
+        # scraping the editor page.
+        text = await _fetch_text(
+            f"https://docs.google.com/document/d/{gdoc.group(1)}/export?format=txt"
+        )
+        stripped = text.strip()
+        if not stripped or stripped.lstrip().lower().startswith(("<!doctype", "<html")):
+            raise UpstreamError(
+                "Google Docs did not return the document text. Make sure the doc "
+                "is shared as 'Anyone with the link'."
+            )
+        first_line = next(ln.strip() for ln in stripped.splitlines() if ln.strip())
+        return ParsedDoc(title=first_line[:120], text=stripped, pages=None)
+
+    file_id = _drive_file_id(url)
+    if not file_id:
+        raise ValidationError(
+            "Unrecognised Google Drive link. Use a single file's share link "
+            "(…/file/d/<id>/view) or a Google Docs document link."
+        )
+
+    payload = await _fetch_bytes(f"https://drive.google.com/uc?export=download&id={file_id}")
+    return await asyncio.to_thread(_parse_drive_payload_sync, file_id, payload)
 
 
 _YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtube-nocookie.com"}
