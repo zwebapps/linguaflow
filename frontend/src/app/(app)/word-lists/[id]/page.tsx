@@ -29,10 +29,16 @@ type Entry = {
   urdu: string;
   hindi: string;
   roman: string;
+  // Verb charts only.
+  present: string;
+  imperfect: string;
+  participle: string;
+  auxiliary: string;
 };
 
 type Detail = {
   id: string;
+  kind: "wordlist" | "verbchart";
   title: string;
   cefr_level: CefrLevel | null;
   source_url: string | null;
@@ -112,6 +118,7 @@ export default function WordListDetailPage() {
     onSuccess: setResult,
   });
 
+  const isChart = data?.kind === "verbchart";
   const showUrdu = data?.entries.some((e) => e.urdu);
   const showHindi = data?.entries.some((e) => e.hindi);
   const showRoman = data?.entries.some((e) => e.roman);
@@ -282,9 +289,16 @@ export default function WordListDetailPage() {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-card">
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="w-12 px-3 py-2 font-medium">#</th>
+                    {!isChart && <th className="w-12 px-3 py-2 font-medium">#</th>}
                     <th className="px-3 py-2 font-medium">German</th>
                     <th className="px-3 py-2 font-medium">English</th>
+                    {isChart && (
+                      <>
+                        <th className="px-3 py-2 font-medium">er/sie/es</th>
+                        <th className="px-3 py-2 font-medium">Imperfect</th>
+                        <th className="px-3 py-2 font-medium">Participle</th>
+                      </>
+                    )}
                     {showUrdu && <th className="px-3 py-2 text-right font-medium">اردو</th>}
                     {showHindi && <th className="px-3 py-2 font-medium">हिन्दी</th>}
                     {showRoman && <th className="px-3 py-2 font-medium">Roman</th>}
@@ -296,11 +310,32 @@ export default function WordListDetailPage() {
                       key={`${e.index}-${i}`}
                       className="border-b border-border/40 last:border-b-0"
                     >
-                      <td className="px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
-                        {e.index}
-                      </td>
+                      {!isChart && (
+                        <td className="px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                          {e.index}
+                        </td>
+                      )}
                       <td className="px-3 py-1.5 font-medium">{e.term}</td>
                       <td className="px-3 py-1.5 text-muted-foreground">{e.gloss}</td>
+                      {isChart && (
+                        <>
+                          <td className="px-3 py-1.5">{e.present}</td>
+                          <td className="px-3 py-1.5">{e.imperfect}</td>
+                          <td className="px-3 py-1.5">
+                            {/* Verbs taking sein form the perfect with ist,
+                                not hat — worth flagging, not hiding. */}
+                            {e.auxiliary === "sein" && (
+                              <span
+                                className="mr-1 text-[10px] text-primary"
+                                title="Forms the perfect with sein: ist gegangen"
+                              >
+                                ist
+                              </span>
+                            )}
+                            {e.participle}
+                          </td>
+                        </>
+                      )}
                       {/* Urdu is right-to-left; without dir it renders mirrored. */}
                       {showUrdu && (
                         <td className="px-3 py-1.5 text-right" dir="rtl" lang="ur">
@@ -320,6 +355,12 @@ export default function WordListDetailPage() {
                 </tbody>
               </table>
             </div>
+            {isChart && data.entries.length > 0 && (
+              <p className="border-t border-border/40 px-3 py-2 text-xs text-muted-foreground">
+                <span className="text-primary">ist</span> marks verbs that form the perfect
+                with <em>sein</em> (ist gegangen); the rest take <em>haben</em> (hat gesagt).
+              </p>
+            )}
             {data.entries.length === 0 && (
               <p className="p-6 text-center text-sm text-muted-foreground">
                 No entries match “{q}”.

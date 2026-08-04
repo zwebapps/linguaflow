@@ -53,9 +53,10 @@ class LibraryDetail(BaseModel):
     source_url: str | None
     reading_minutes: int | None
     content_md: str | None
-    # "prose" | "wordlist". A vocabulary PDF is a TABLE that lost its columns
-    # during text extraction; rendering it as paragraphs is unreadable, so the
-    # client is told what it is and draws the columns back.
+    # "prose" | "wordlist" | "verbchart". A vocabulary PDF or a conjugation
+    # chart is a TABLE that lost its columns during text extraction; rendering
+    # it as paragraphs is unreadable, so the client is told what it is and
+    # draws the columns back.
     content_kind: str
     wordlist: list[dict[str, str]] | None
     chunk_count: int
@@ -63,6 +64,19 @@ class LibraryDetail(BaseModel):
 
 
 # ── View helpers ───────────────────────────────────────────────────────────────
+
+_EMPTY_ROW = {
+    "index": "",
+    "term": "",
+    "gloss": "",
+    "urdu": "",
+    "hindi": "",
+    "roman": "",
+    "present": "",
+    "imperfect": "",
+    "participle": "",
+    "auxiliary": "",
+}
 
 
 def _list_view(document: Document) -> LibraryItem:
@@ -82,11 +96,20 @@ def _detail_view(document: Document) -> LibraryDetail:
     # Detected per request rather than stored: it's a regex over already-loaded
     # text (~ms for a 500-entry list) and it needs no migration, so a document
     # ingested before this existed renders correctly too.
-    from app.services.doc_enrich import looks_like_wordlist, parse_wordlist
+    from app.services.doc_enrich import classify_content, parse_verbchart, parse_wordlist
 
     content = document.content_md or ""
-    kind = "wordlist" if looks_like_wordlist(content) else "prose"
-    rows = parse_wordlist(content) if kind == "wordlist" else []
+    kind = classify_content(content)
+    parsed = (
+        parse_verbchart(content)
+        if kind == "verbchart"
+        else parse_wordlist(content)
+        if kind == "wordlist"
+        else []
+    )
+    # Both shapes go out under one key, so fill the columns the other shape
+    # doesn't have rather than leaving the client to guess at undefined.
+    rows = [{**_EMPTY_ROW, **row} for row in parsed]
 
     return LibraryDetail(
         id=str(document.id),

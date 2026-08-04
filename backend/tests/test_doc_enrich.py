@@ -138,3 +138,94 @@ def test_a_truncated_response_still_yields_its_complete_entries() -> None:
         "der Weihnachtsmarkt",
         "das Lebkuchenherz",
     ]
+
+
+# ── Verb conjugation charts ───────────────────────────────────────────────────
+# A second table shape: five Latin columns, no numbering. These pin the two
+# bugs found against the real chart, both of which silently LOST verbs.
+
+CHART = """GERMAN IRREGULAR VERBS CHART
+Infinitive Meaning
+backen bake backt backte gebacken
+beginnen begin beginnt begann begonnen
+biegen bend, turn biegt bog (bin etc.) gebogen
+bleiben stay, remain bleibt blieb (bin etc.) geblieben
+essen eat3 isst aß gegessen
+gelten5 be valid, be of worth gilt galt gegolten
+haben have hat hatte gehabt
+sein be ist war (bin etc.) gewesen
+tun do tut tat getan
+wissen know (a fact) weiß18 wusste gewusst
+An annotated list of German irregular verbs | D Nutting 2002 Page 1
+"""
+
+
+def _chart_rows(text: str = CHART) -> dict[str, dict[str, str]]:
+    return {r["term"]: r for r in enr.parse_verbchart(text)}
+
+
+def test_a_chart_row_splits_into_its_five_columns() -> None:
+    r = _chart_rows()["backen"]
+    assert (r["gloss"], r["present"], r["imperfect"], r["participle"]) == (
+        "bake",
+        "backt",
+        "backte",
+        "gebacken",
+    )
+
+
+def test_bin_etc_marks_a_verb_that_takes_sein() -> None:
+    """Which auxiliary a verb takes is a real teaching point, so the marker is
+    captured rather than thrown away with the rest of the noise."""
+    assert _chart_rows()["bleiben"]["auxiliary"] == "sein"
+    assert _chart_rows()["haben"]["auxiliary"] == "haben"
+
+
+def test_footnote_markers_are_stripped_from_every_column() -> None:
+    """Extraction glues them on: "gelten5", "weiß18", "eat3"."""
+    assert _chart_rows()["gelten"]["term"] == "gelten"
+    assert _chart_rows()["wissen"]["present"] == "weiß"
+    assert _chart_rows()["essen"]["gloss"] == "eat"
+
+
+def test_short_infinitives_are_not_missed() -> None:
+    """"tun" and "sein" don't end in -en."""
+    assert _chart_rows()["tun"]["participle"] == "getan"
+    assert _chart_rows()["sein"]["participle"] == "gewesen"
+
+
+def test_headers_and_page_furniture_are_not_verbs() -> None:
+    terms = set(_chart_rows())
+    assert "An" not in terms and "Infinitive" not in terms and "GERMAN" not in terms
+
+
+def test_a_truncated_row_does_not_parse_and_steal_the_next_verb() -> None:
+    """The bug: "erschrecken … erschrak (bin etc.)" had its participle wrap to
+    the next line. Without a suffix check on the participle the truncated row
+    parsed with "erschrak" in that slot, which orphaned the real participle —
+    and the orphan then prefixed itself onto the FOLLOWING row, so two verbs
+    were lost at once."""
+    wrapped = (
+        "erschrecken2 be frightened erschrickt erschrak (bin etc.)\n"
+        "erschrocken\n"
+        "essen eat3 isst aß gegessen\n"
+    )
+    rows = _chart_rows(wrapped)
+    assert rows["erschrecken"]["participle"] == "erschrocken"
+    assert rows["erschrecken"]["auxiliary"] == "sein"
+    assert rows["essen"]["participle"] == "gegessen"  # not swallowed
+
+
+def test_a_row_wrapped_over_three_lines_is_reassembled() -> None:
+    """"werden" spans three lines in the real chart. A shorter join would
+    parse "turn out... wird wurde geworden" as a verb called "turn"."""
+    wrapped = "werden become, ALSO\nturn out...17\nwird wurde (bin etc.) geworden\n"
+    rows = _chart_rows(wrapped)
+    assert "turn" not in rows
+    assert rows["werden"]["participle"] == "geworden"
+    assert rows["werden"]["auxiliary"] == "sein"
+
+
+def test_prose_is_not_mistaken_for_a_chart() -> None:
+    prose = "Anna geht in den Park. Sie liest ein Buch.\n" * 20
+    assert not enr.looks_like_verbchart(prose)

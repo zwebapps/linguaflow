@@ -162,6 +162,20 @@ def append_glossary(content: str, entries: list[dict[str, str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def classify_content(content: str) -> str:
+    """Which shape a document's text is: "verbchart", "wordlist" or "prose".
+
+    Verb chart before word list: a conjugation table's rows are not numbered,
+    so the wordlist detector wouldn't claim it, but check the specific shape
+    first regardless.
+    """
+    if looks_like_verbchart(content):
+        return "verbchart"
+    if looks_like_wordlist(content):
+        return "wordlist"
+    return "prose"
+
+
 async def enrich_document(db: AsyncSession, document: Document) -> bool:
     """Classify the document and add the scaffolding it's missing.
 
@@ -174,7 +188,7 @@ async def enrich_document(db: AsyncSession, document: Document) -> bool:
 
     # Classify FIRST — everything below branches on it, and the kind must be
     # stamped even when there is nothing else to add.
-    kind = "wordlist" if looks_like_wordlist(content) else "prose"
+    kind = classify_content(content)
     has_glossary = bool(re.search(r"^#{1,4}\s*glossar\s*$", content, re.I | re.M))
     # A word list IS a glossary; generating a 14-word one for a 500-entry verb
     # table would be both wasteful and wrong.
@@ -230,7 +244,7 @@ async def enrich_document(db: AsyncSession, document: Document) -> bool:
     # Imported prose is reading practice unless an admin said otherwise; a
     # word list is reference vocabulary, which is a different shelf.
     if not document.skill:
-        document.skill = "vocabulary" if kind == "wordlist" else "reading"
+        document.skill = "reading" if kind == "prose" else "vocabulary"
         changed = True
 
     if changed:
@@ -306,3 +320,119 @@ def looks_like_wordlist(content: str) -> bool:
         return False
     rows = parse_wordlist(content)
     return len(rows) >= WORDLIST_MIN_ROWS and len(rows) >= 0.5 * len(lines)
+
+
+# ── Verb conjugation charts ───────────────────────────────────────────────────
+# A different table shape from the numbered word list: five Latin-only columns,
+# no numbering —
+#   "biegen bend, turn biegt bog (bin etc.) gebogen"
+#    infinitive │ meaning │ present (er/sie/es) │ imperfect │ participle
+# Parsed RIGHT to left, because the participle and the tense forms are single
+# predictable tokens while the meaning is free text of unknown length.
+
+# "(bin etc.)" marks a verb that takes sein in the perfect — a real teaching
+# point, so it is captured rather than discarded.
+_AUX_SEIN = re.compile(r"\(bin etc\.?\)", re.I)
+# Footnote markers glue onto tokens during extraction: "gelten5", "weiß18".
+# No German verb form ends in a digit, so stripping them is safe.
+_FOOTNOTE = re.compile(r"\d+$")
+# Inseparable prefixes produce participles with no ge-: verloren, empfohlen.
+_PARTICIPLE_PREFIX = ("ge", "ver", "be", "er", "ent", "emp", "zer", "miss", "über", "unter")
+VERBCHART_MIN_ROWS = 10
+
+
+def _strip_footnote(token: str) -> str:
+    return _FOOTNOTE.sub("", token)
+
+
+def parse_verbchart_row(line: str) -> dict[str, str] | None:
+    """One chart line → its columns, or None if it isn't a verb row.
+
+    Header lines, footnotes and page furniture must all fail this: the
+    infinitive has to be a lowercase German infinitive and the last token has
+    to look like a participle, which no prose line satisfies.
+    """
+    text = line.strip()
+    if not text:
+        return None
+    takes_sein = bool(_AUX_SEIN.search(text))
+    text = _AUX_SEIN.sub(" ", text)
+
+    tokens = [t for t in text.split() if t]
+    # infinitive + at least one meaning word + present + imperfect + participle
+    if len(tokens) < 5:
+        return None
+
+    infinitive = _strip_footnote(tokens[0])
+    participle = _strip_footnote(tokens[-1])
+    imperfect = _strip_footnote(tokens[-2])
+    present = _strip_footnote(tokens[-3])
+    meaning = " ".join(_strip_footnote(t) for t in tokens[1:-3]).strip()
+
+    # Infinitives are lowercase and end in -en or -n ("tun", "sein"). This is
+    # what rejects "An annotated list…" and the "Infinitive Meaning" header.
+    if not infinitive.islower() or not infinitive.endswith("n"):
+        return None
+    # A participle also has to END like one: -en, -t or -n (geschrie(e)n).
+    # Without the suffix check a TRUNCATED row passes — "erschrecken2 be
+    # frightened erschrickt erschrak (bin etc.)", whose participle wrapped to
+    # the next line, was accepted with "erschrak" in that slot, which then
+    # orphaned the real participle and let it swallow the following verb.
+    if (
+        not participle.islower()
+        or not participle.startswith(_PARTICIPLE_PREFIX)
+        or not participle.endswith(("n", "t"))
+    ):
+        return None
+    # Tense cells are single words; a sentence in that slot means this is prose.
+    if not present.islower() or not imperfect.islower():
+        return None
+    if not meaning:
+        return None
+
+    return {
+        "term": infinitive,
+        "gloss": meaning,
+        "present": present,
+        "imperfect": imperfect,
+        "participle": participle,
+        # "sein" verbs form the perfect with bin/ist, not habe/hat.
+        "auxiliary": "sein" if takes_sein else "haben",
+    }
+
+
+def parse_verbchart(content: str) -> list[dict[str, str]]:
+    """Every verb row in the chart, joining rows that wrapped across lines.
+
+    PDF extraction breaks a long meaning onto its own line
+    ("bitten request, ask" / "someone to do..." / "bittet bat gebeten"), so a
+    line that doesn't parse is held and retried with the next one before being
+    discarded.
+    """
+    rows: list[dict[str, str]] = []
+    buffer: list[str] = []
+    for line in (content or "").splitlines():
+        if not line.strip():
+            continue
+        buffer.append(line.strip())
+        # LONGEST join first: a row can wrap over three lines ("werden
+        # become, ALSO" / "turn out...17" / "wird wurde (bin etc.) geworden"),
+        # and only the full join carries the real infinitive. A shorter tail
+        # would parse "turn out... wird wurde geworden" as a verb called
+        # "turn". This is safe because the participle suffix check stops a
+        # truncated row from parsing and leaving debris in the buffer.
+        for start in range(len(buffer)):
+            row = parse_verbchart_row(" ".join(buffer[start:]))
+            if row:
+                rows.append(row)
+                buffer = []
+                break
+        else:
+            # Keep at most three lines in hand; beyond that it isn't a wrap.
+            buffer = buffer[-3:]
+    return rows
+
+
+def looks_like_verbchart(content: str) -> bool:
+    """True when the document is a conjugation chart."""
+    return len(parse_verbchart(content)) >= VERBCHART_MIN_ROWS

@@ -175,13 +175,19 @@ export type WordlistRow = {
   urdu: string;
   hindi: string;
   roman: string;
+  /** Verb charts only; empty on plain word lists. */
+  present: string;
+  imperfect: string;
+  participle: string;
+  /** "sein" | "haben" — which auxiliary forms the perfect. */
+  auxiliary: string;
 };
 
 export type LibraryDocument = LibraryItem & {
   source_url: string | null;
   content_md: string;
-  /** "wordlist" documents are tables that lost their columns on extraction. */
-  content_kind?: "prose" | "wordlist";
+  /** Non-prose documents are tables that lost their columns on extraction. */
+  content_kind?: "prose" | "wordlist" | "verbchart";
   wordlist?: WordlistRow[] | null;
 };
 

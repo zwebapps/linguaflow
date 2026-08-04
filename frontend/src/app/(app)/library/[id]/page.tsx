@@ -43,6 +43,8 @@ export default function LibraryReaderPage() {
       apiFetch<LookupWordResult>("/tools/lookup-word", { method: "POST", json: { lemma, gloss_langs: ["en"] } }),
   });
 
+  const isChart = data?.content_kind === "verbchart";
+
   const paragraphs = useMemo(() => {
     if (!data?.content_md) return [];
     return splitReaderParagraphs(data.content_md);
@@ -92,10 +94,10 @@ export default function LibraryReaderPage() {
             />
           </aside>
           <div className="lg:col-start-2">
-            {data.content_kind === "wordlist" && data.wordlist?.length ? (
-              // A vocabulary PDF: the columns were lost during text
-              // extraction, so paragraphs render as an unreadable run-on.
-              // Draw the table back instead.
+            {data.content_kind !== "prose" && data.wordlist?.length ? (
+              // A vocabulary PDF or a conjugation chart: the columns were lost
+              // during text extraction, so paragraphs render as an unreadable
+              // run-on. Draw the table back instead.
               <div className="panel rounded-lg p-5">
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <h1 className="font-display text-xl font-semibold">{data.title}</h1>
@@ -108,9 +110,16 @@ export default function LibraryReaderPage() {
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-card">
                       <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                        <th className="w-12 py-2 pr-2 font-medium">#</th>
+                        {!isChart && <th className="w-12 py-2 pr-2 font-medium">#</th>}
                         <th className="py-2 pr-3 font-medium">German</th>
                         <th className="py-2 pr-3 font-medium">English</th>
+                        {isChart && (
+                          <>
+                            <th className="py-2 pr-3 font-medium">er/sie/es</th>
+                            <th className="py-2 pr-3 font-medium">Imperfect</th>
+                            <th className="py-2 pr-3 font-medium">Participle</th>
+                          </>
+                        )}
                         {data.wordlist.some((r) => r.urdu) && (
                           <th className="py-2 pr-3 text-right font-medium">اردو</th>
                         )}
@@ -125,9 +134,11 @@ export default function LibraryReaderPage() {
                     <tbody>
                       {data.wordlist.map((r, i) => (
                         <tr key={`${r.index}-${i}`} className="border-b border-border/40 last:border-b-0">
-                          <td className="py-1.5 pr-2 font-mono text-[11px] text-muted-foreground">
-                            {r.index}
-                          </td>
+                          {!isChart && (
+                            <td className="py-1.5 pr-2 font-mono text-[11px] text-muted-foreground">
+                              {r.index}
+                            </td>
+                          )}
                           <td className="py-1.5 pr-3 font-medium">
                             <button
                               type="button"
@@ -139,6 +150,20 @@ export default function LibraryReaderPage() {
                             </button>
                           </td>
                           <td className="py-1.5 pr-3 text-muted-foreground">{r.gloss}</td>
+                          {isChart && (
+                            <>
+                              <td className="py-1.5 pr-3">{r.present}</td>
+                              <td className="py-1.5 pr-3">{r.imperfect}</td>
+                              <td className="py-1.5 pr-3">
+                                {/* Verbs taking sein form the perfect with
+                                    ist, not hat. */}
+                                {r.auxiliary === "sein" && (
+                                  <span className="mr-1 text-[10px] text-primary">ist</span>
+                                )}
+                                {r.participle}
+                              </td>
+                            </>
+                          )}
                           {data.wordlist!.some((x) => x.urdu) && (
                             // Urdu is right-to-left; without dir it renders mirrored.
                             <td className="py-1.5 pr-3 text-right" dir="rtl" lang="ur">

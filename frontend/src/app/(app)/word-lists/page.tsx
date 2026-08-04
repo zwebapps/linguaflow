@@ -15,6 +15,7 @@ import type { CefrLevel } from "@/lib/types";
 
 type WordlistSummary = {
   id: string;
+  kind: "wordlist" | "verbchart";
   title: string;
   cefr_level: CefrLevel | null;
   entries: number;
@@ -65,7 +66,8 @@ export default function WordListsPage() {
               {list.cefr_level && <CefrBadge level={list.cefr_level} />}
             </div>
             <p className="mt-2 text-sm text-muted-foreground">
-              {list.entries.toLocaleString()} words
+              {list.entries.toLocaleString()}{" "}
+              {list.kind === "verbchart" ? "verbs · conjugation chart" : "words"}
             </p>
           </Link>
         ))}

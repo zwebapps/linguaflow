@@ -24,7 +24,7 @@ from sqlalchemy import select
 from app.core.deps import CurrentUser, DbSession
 from app.core.errors import NotFound, ValidationError
 from app.db.models import Document
-from app.services.doc_enrich import parse_wordlist
+from app.services.doc_enrich import parse_verbchart, parse_wordlist
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -38,6 +38,7 @@ OPTIONS_PER_QUESTION = 4
 
 class WordlistSummary(BaseModel):
     id: str
+    kind: str
     title: str
     cefr_level: str | None
     language: str
@@ -46,16 +47,23 @@ class WordlistSummary(BaseModel):
 
 
 class WordlistEntry(BaseModel):
-    index: str
+    # Shared by both shapes; the unused ones come back empty.
+    index: str = ""
     term: str
     gloss: str
-    urdu: str
-    hindi: str
-    roman: str
+    urdu: str = ""
+    hindi: str = ""
+    roman: str = ""
+    # Verb charts only.
+    present: str = ""
+    imperfect: str = ""
+    participle: str = ""
+    auxiliary: str = ""
 
 
 class WordlistDetail(BaseModel):
     id: str
+    kind: str
     title: str
     cefr_level: str | None
     language: str
@@ -101,13 +109,23 @@ class SubmitResponse(BaseModel):
     results: list[SubmitResult]
 
 
+def _rows_for(document: Document) -> list[dict[str, str]]:
+    """Rows for either table shape. Both expose `term` + `gloss`, so search,
+    tests and flashcards work identically; a verb chart just carries extra
+    tense columns alongside."""
+    content = document.content_md or ""
+    if document.content_kind == "verbchart":
+        return parse_verbchart(content)
+    return parse_wordlist(content)
+
+
 async def _load(db: DbSession, document_id: uuid.UUID, user: Any) -> tuple[Document, list[dict]]:
     document = await db.get(Document, document_id)
     if document is None or document.status != "ready":
         raise NotFound("That word list doesn't exist.")
     if document.language != user.target_language:
         raise NotFound("That word list isn't in the language you're learning.")
-    rows = parse_wordlist(document.content_md or "")
+    rows = _rows_for(document)
     if not rows:
         raise NotFound("That document has no vocabulary entries.")
     return document, rows
@@ -121,7 +139,7 @@ async def list_wordlists(db: DbSession, user: CurrentUser) -> list[WordlistSumma
             await db.execute(
                 select(Document)
                 .where(
-                    Document.content_kind == "wordlist",
+                    Document.content_kind.in_(("wordlist", "verbchart")),
                     Document.status == "ready",
                     Document.language == user.target_language,
                 )
@@ -133,11 +151,12 @@ async def list_wordlists(db: DbSession, user: CurrentUser) -> list[WordlistSumma
     )
     out = []
     for d in docs:
-        rows = parse_wordlist(d.content_md or "")
+        rows = _rows_for(d)
         if rows:
             out.append(
                 WordlistSummary(
                     id=str(d.id),
+                    kind=d.content_kind,
                     title=d.title,
                     cefr_level=d.cefr_level,
                     language=d.language,
@@ -168,6 +187,7 @@ async def get_wordlist(
         ]
     return WordlistDetail(
         id=str(document.id),
+        kind=document.content_kind,
         title=document.title,
         cefr_level=document.cefr_level,
         language=document.language,
