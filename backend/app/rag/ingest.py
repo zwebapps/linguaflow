@@ -124,7 +124,12 @@ async def _run_pipeline(db: AsyncSession, document: Document) -> None:
 
     await _embed_and_upsert(document, chunks)
 
-    document.title = document.title or parsed.title
+    # A link import stores the URL as a placeholder title (the real one is only
+    # known after parsing). `title or parsed.title` therefore never replaced it,
+    # and the library listed raw URLs as headings. Treat the URL — and an empty
+    # string — as "no title yet"; anything an admin actually typed still wins.
+    if parsed.title and document.title.strip() in ("", (document.source_url or "").strip()):
+        document.title = parsed.title
     document.content_md = text
     document.content_hash = content_hash
     document.chunk_count = len(chunks)
@@ -132,6 +137,17 @@ async def _run_pipeline(db: AsyncSession, document: Document) -> None:
     document.status = "ready"
     document.error = None
     await db.commit()
+
+    # Annotate AFTER the document is ready: an imported text with no level and
+    # no glossary renders as a second-class citizen next to a seeded story.
+    # Deliberately non-fatal and post-commit — the document is already usable,
+    # and a failed annotation must never undo a successful ingest.
+    try:
+        from app.services.doc_enrich import enrich_document
+
+        await enrich_document(db, document)
+    except Exception:  # noqa: BLE001
+        log.warning("ingest_enrich_skipped", document_id=str(doc_id), exc_info=True)
 
 
 async def _embed_and_upsert(document: Document, chunks: list[Chunk]) -> None:

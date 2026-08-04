@@ -12,7 +12,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api";
 import { learnerMatchScore, learnerSearchStrategy } from "@/lib/learner-copy";
-import type { SearchResponse } from "@/lib/types";
+import type { SearchResponse, SearchResult } from "@/lib/types";
+
+/** One card per source document; its matching passages listed beneath. */
+function groupByDocument(results: SearchResult[]) {
+  const byDoc = new Map<string, { document_id: string; title: string; best: number; hits: SearchResult[] }>();
+  for (const r of results) {
+    const g = byDoc.get(r.document_id);
+    if (g) {
+      g.hits.push(r);
+      g.best = Math.max(g.best, r.score);
+    } else {
+      byDoc.set(r.document_id, { document_id: r.document_id, title: r.title, best: r.score, hits: [r] });
+    }
+  }
+  return [...byDoc.values()].sort((a, b) => b.best - a.best);
+}
 
 export default function SearchPage() {
   const [query, setQuery] = useState("");
@@ -51,24 +66,45 @@ export default function SearchPage() {
       {search.data && (
         <div className="mt-6 space-y-3">
           <p className="label-mono">
-            {search.data.results.length} results · {learnerSearchStrategy(search.data.strategy)} ·{" "}
-            {search.data.took_ms} ms
+            {search.data.results.length} passages in {groupByDocument(search.data.results).length}{" "}
+            {groupByDocument(search.data.results).length === 1 ? "document" : "documents"} ·{" "}
+            {learnerSearchStrategy(search.data.strategy)} · {search.data.took_ms} ms
           </p>
-          {search.data.results.map((r) => (
-            <Link
-              key={r.id}
-              to="/library/$id"
-              params={{ id: r.document_id }}
-              className="panel block rounded-lg p-4 hover:bg-secondary/30"
-            >
+          {/* Grouped by document: a 58-chunk book matching eight times looked
+              like eight duplicate results, because every passage carried the
+              same title. One card per source, its passages listed inside. */}
+          {groupByDocument(search.data.results).map((group) => (
+            <div key={group.document_id} className="panel rounded-lg p-4">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-display font-semibold">{r.title}</span>
+                <Link
+                  to="/library/$id"
+                  params={{ id: group.document_id }}
+                  className="font-display font-semibold hover:underline"
+                >
+                  {group.title}
+                </Link>
                 <Badge variant="secondary" className="text-[10px]">
-                  {learnerMatchScore(r.score)}
+                  {learnerMatchScore(group.best)}
                 </Badge>
+                {group.hits.length > 1 && (
+                  <span className="text-xs text-muted-foreground">
+                    {group.hits.length} matching passages
+                  </span>
+                )}
               </div>
-              <p className="mt-2 text-sm text-muted-foreground">{r.snippet}</p>
-            </Link>
+              <ul className="mt-2 space-y-2">
+                {group.hits.map((r) => (
+                  <li key={r.id} className="text-sm text-muted-foreground">
+                    {r.page != null && (
+                      <span className="mr-2 font-mono text-[10px] text-muted-foreground/80">
+                        p.{r.page}
+                      </span>
+                    )}
+                    {r.snippet}
+                  </li>
+                ))}
+              </ul>
+            </div>
           ))}
         </div>
       )}

@@ -53,6 +53,11 @@ class LibraryDetail(BaseModel):
     source_url: str | None
     reading_minutes: int | None
     content_md: str | None
+    # "prose" | "wordlist". A vocabulary PDF is a TABLE that lost its columns
+    # during text extraction; rendering it as paragraphs is unreadable, so the
+    # client is told what it is and draws the columns back.
+    content_kind: str
+    wordlist: list[dict[str, str]] | None
     chunk_count: int
     created_at: Any
 
@@ -74,6 +79,15 @@ def _list_view(document: Document) -> LibraryItem:
 
 
 def _detail_view(document: Document) -> LibraryDetail:
+    # Detected per request rather than stored: it's a regex over already-loaded
+    # text (~ms for a 500-entry list) and it needs no migration, so a document
+    # ingested before this existed renders correctly too.
+    from app.services.doc_enrich import looks_like_wordlist, parse_wordlist
+
+    content = document.content_md or ""
+    kind = "wordlist" if looks_like_wordlist(content) else "prose"
+    rows = parse_wordlist(content) if kind == "wordlist" else []
+
     return LibraryDetail(
         id=str(document.id),
         title=document.title,
@@ -83,6 +97,8 @@ def _detail_view(document: Document) -> LibraryDetail:
         source_url=document.source_url,
         reading_minutes=document.reading_minutes,
         content_md=document.content_md,
+        content_kind=kind,
+        wordlist=rows or None,
         chunk_count=document.chunk_count,
         created_at=document.created_at,
     )

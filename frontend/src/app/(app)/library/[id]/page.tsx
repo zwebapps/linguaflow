@@ -92,6 +92,72 @@ export default function LibraryReaderPage() {
             />
           </aside>
           <div className="lg:col-start-2">
+            {data.content_kind === "wordlist" && data.wordlist?.length ? (
+              // A vocabulary PDF: the columns were lost during text
+              // extraction, so paragraphs render as an unreadable run-on.
+              // Draw the table back instead.
+              <div className="panel rounded-lg p-5">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <h1 className="font-display text-xl font-semibold">{data.title}</h1>
+                  {data.cefr_level && <CefrBadge level={data.cefr_level} />}
+                  <span className="text-xs text-muted-foreground">
+                    {data.wordlist.length} entries
+                  </span>
+                </div>
+                <div className="max-h-[70vh] overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-card">
+                      <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                        <th className="w-12 py-2 pr-2 font-medium">#</th>
+                        <th className="py-2 pr-3 font-medium">German</th>
+                        <th className="py-2 pr-3 font-medium">English</th>
+                        {data.wordlist.some((r) => r.urdu) && (
+                          <th className="py-2 pr-3 text-right font-medium">اردو</th>
+                        )}
+                        {data.wordlist.some((r) => r.hindi) && (
+                          <th className="py-2 pr-3 font-medium">हिन्दी</th>
+                        )}
+                        {data.wordlist.some((r) => r.roman) && (
+                          <th className="py-2 font-medium">Roman</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.wordlist.map((r, i) => (
+                        <tr key={`${r.index}-${i}`} className="border-b border-border/40 last:border-b-0">
+                          <td className="py-1.5 pr-2 font-mono text-[11px] text-muted-foreground">
+                            {r.index}
+                          </td>
+                          <td className="py-1.5 pr-3 font-medium">
+                            <button
+                              type="button"
+                              className="rounded-sm text-left hover:underline"
+                              onClick={() => onWordClick(r.term)}
+                              title="Look up"
+                            >
+                              {r.term}
+                            </button>
+                          </td>
+                          <td className="py-1.5 pr-3 text-muted-foreground">{r.gloss}</td>
+                          {data.wordlist!.some((x) => x.urdu) && (
+                            // Urdu is right-to-left; without dir it renders mirrored.
+                            <td className="py-1.5 pr-3 text-right" dir="rtl" lang="ur">
+                              {r.urdu}
+                            </td>
+                          )}
+                          {data.wordlist!.some((x) => x.hindi) && (
+                            <td className="py-1.5 pr-3" lang="hi">{r.hindi}</td>
+                          )}
+                          {data.wordlist!.some((x) => x.roman) && (
+                            <td className="py-1.5 text-muted-foreground">{r.roman}</td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
             <ReaderArticlePage
               theme={theme}
               fontSizePx={size}
@@ -143,6 +209,7 @@ export default function LibraryReaderPage() {
                 </p>
               )}
             />
+            )}
           </div>
         </div>
       )}

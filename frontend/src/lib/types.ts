@@ -168,9 +168,21 @@ export type LibraryItem = {
   created_at: string;
 };
 
+export type WordlistRow = {
+  index: string;
+  term: string;
+  gloss: string;
+  urdu: string;
+  hindi: string;
+  roman: string;
+};
+
 export type LibraryDocument = LibraryItem & {
   source_url: string | null;
   content_md: string;
+  /** "wordlist" documents are tables that lost their columns on extraction. */
+  content_kind?: "prose" | "wordlist";
+  wordlist?: WordlistRow[] | null;
 };
 
 export type VocabItem = {

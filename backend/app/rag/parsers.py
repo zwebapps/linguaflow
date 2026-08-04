@@ -288,7 +288,11 @@ async def _parse_web(url: str) -> ParsedDoc:
     # readability strips nav/ads/sidebars — the difference between a clean lesson
     # excerpt and a chunk full of "Subscribe to our newsletter".
     doc = ReadabilityDocument(html)
-    title = (doc.title() or "").strip() or url
+    # `short_title()` strips the site's boilerplate suffix — readability's
+    # `title()` yields "Auf dem Weihnachtsmarkt (A1) | MeloLingua", which is a
+    # tab caption, not a story heading. Fall back through the full title, then
+    # the URL, so a page with no usable title still ingests.
+    title = (doc.short_title() or "").strip() or (doc.title() or "").strip() or url
     text = _html_to_text(doc.summary(html_partial=True))
     return ParsedDoc(title=title, text=text, pages=None)
 
