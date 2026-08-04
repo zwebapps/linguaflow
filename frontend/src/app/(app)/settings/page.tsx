@@ -4,7 +4,6 @@ import { Link } from "@/components/router-link";
 
 import { useMutation } from "@tanstack/react-query";
 import { AppShell } from "@/components/app-shell";
-import { VoicePicker } from "@/components/voice/voice-picker";
 import { ErrorAlert } from "@/components/shared/error-alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,11 +111,6 @@ export default function SettingsPage() {
               onCheckedChange={setSidebarBranding}
             />
           </div>
-        </div>
-
-        <div className="panel space-y-4 rounded-lg p-6">
-          <h2 className="font-display text-lg font-semibold">Speaking</h2>
-          <VoicePicker />
         </div>
 
         <div className="panel space-y-4 rounded-lg p-6">
