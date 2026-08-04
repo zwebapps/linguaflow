@@ -1,4 +1,10 @@
 import { API_BASE } from "./env";
+import {
+  DEFAULT_PERSONA,
+  personaById,
+  pickVoice,
+  type VoicePersona,
+} from "./voice-persona";
 import { getAccessToken } from "./auth-store";
 import { ApiError } from "./api";
 import type {
@@ -97,13 +103,17 @@ export async function streamSpeakingTurn(
  */
 let cachedVoices: SpeechSynthesisVoice[] = [];
 
-/** A voice for `lang` ("de-DE", "tr-TR", …), matching on the language prefix. */
-function voiceFor(lang: string): SpeechSynthesisVoice | undefined {
+/** Every voice this device knows about, tolerating the async list. */
+export function knownVoices(): SpeechSynthesisVoice[] {
+  if (typeof speechSynthesis === "undefined") return cachedVoices;
   const voices = speechSynthesis.getVoices();
   if (voices.length) cachedVoices = voices;
-  const pool = voices.length ? voices : cachedVoices;
-  const prefix = lang.slice(0, 2).toLowerCase();
-  return pool.find((v) => v.lang.toLowerCase().startsWith(prefix));
+  return voices.length ? voices : cachedVoices;
+}
+
+/** A voice for `lang` ("de-DE", "tr-TR", …) matching the learner's persona. */
+function voiceFor(lang: string, persona: VoicePersona): SpeechSynthesisVoice | undefined {
+  return pickVoice(knownVoices(), lang, persona);
 }
 
 export function primeSpeechVoices(): void {
@@ -121,7 +131,11 @@ export function primeSpeechVoices(): void {
  * hands-free conversation loop must not reopen the mic while the tutor is
  * still talking, or the tutor transcribes itself.
  */
-export function playSpeakingAudio(payload: SpeakingStreamAudio, muted: boolean): Promise<void> {
+export function playSpeakingAudio(
+  payload: SpeakingStreamAudio,
+  muted: boolean,
+  persona: VoicePersona = personaById(DEFAULT_PERSONA),
+): Promise<void> {
   if (muted) return Promise.resolve();
   if (payload.use_browser_tts && payload.text) {
     return new Promise((resolve) => {
@@ -129,11 +143,13 @@ export function playSpeakingAudio(payload: SpeakingStreamAudio, muted: boolean):
       // End-of-session feedback arrives with the LEARNER's language, not de-DE
       // — reading English coaching in a German voice is barely intelligible.
       u.lang = payload.lang ?? "de-DE";
-      const voice = voiceFor(u.lang);
+      const voice = voiceFor(u.lang, persona);
       if (voice) u.voice = voice;
-      // Slightly slower than default: this is a language learner listening, and
-      // the platform default rate is brisk for someone at A1/A2.
-      u.rate = 0.95;
+      // The persona carries its own rate: it is already slower than the
+      // platform default, which is brisk for someone at A1/A2.
+      u.rate = persona.rate;
+      // Pitch is how a "younger" voice is approximated — no engine exposes age.
+      u.pitch = persona.pitch;
       u.onend = () => resolve();
       u.onerror = () => resolve();
       speechSynthesis.speak(u);

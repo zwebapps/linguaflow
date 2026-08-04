@@ -14,6 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { personaById } from "@/lib/voice-persona";
+import { useVoiceStore } from "@/lib/voice-store";
 import {
   cancelSpeakingAudio,
   playSpeakingAudio,
@@ -136,6 +138,10 @@ export function SpeakingSession({
   const [sessionActive, setSessionActive] = useState(false);
   const [userSpeaking, setUserSpeaking] = useState(false);
   const [muted, setMuted] = useState(false);
+  // The learner's chosen voice. Read via a ref as well, because the streaming
+  // callbacks below are created once and would otherwise capture the value it
+  // had when the session started.
+  const personaId = useVoiceStore((s) => s.personaId);
   const [level, setLevel] = useState(0);
   const [statusLabel, setStatusLabel] = useState<string | null>(null);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -181,6 +187,7 @@ export function SpeakingSession({
   const vadRef = useRef<VadState>(freshVad(0));
   const discardRef = useRef(false);
   const mutedRef = useRef(false);
+  const personaRef = useRef(personaById(personaId));
   const abortRef = useRef<AbortController | null>(null);
   // sendTurn (defined first) and beginListening (defined after) call each
   // other across turns; the ref breaks the circular capture without stale
@@ -189,6 +196,7 @@ export function SpeakingSession({
 
   modeRef.current = mode;
   mutedRef.current = muted;
+  personaRef.current = personaById(personaId);
 
   const stopMeter = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -244,8 +252,9 @@ export function SpeakingSession({
     void playSpeakingAudio(
       { use_browser_tts: true, text: scenario.opening, lang: "de-DE", data_uri: null },
       muted,
+      personaById(personaId),
     );
-  }, [scenario?.opening, muted]);
+  }, [scenario?.opening, muted, personaId]);
 
   /** RMS 0–100 from the time-domain signal — steadier than frequency averages. */
   const readRms = useCallback((): number => {
@@ -371,7 +380,9 @@ export function SpeakingSession({
               // then the coach's feedback). Chain, don't replace, or the
               // second cuts the first off and the await returns early.
               const prev = playback;
-              playback = prev.then(() => playSpeakingAudio(d, mutedRef.current));
+              playback = prev.then(() =>
+                playSpeakingAudio(d, mutedRef.current, personaRef.current),
+              );
             },
             onSessionFeedback: (d) => setCoachFeedback(d.text),
             onUsage: (d) => setUsage(d),
@@ -508,6 +519,7 @@ export function SpeakingSession({
       await playSpeakingAudio(
         { use_browser_tts: true, text: scenario.opening, lang: "de-DE", data_uri: null },
         mutedRef.current,
+        personaRef.current,
       );
     }
     // Via the ref: the awaits above straddle renders, and a stale closure here
@@ -731,6 +743,7 @@ export function SpeakingSession({
                           void playSpeakingAudio(
                             { use_browser_tts: true, text: c.suggestion, lang: "de-DE", data_uri: null },
                             false,
+                            personaRef.current,
                           )
                         }
                       >
