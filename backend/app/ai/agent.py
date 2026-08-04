@@ -275,6 +275,13 @@ async def stream_tutor_turn(
         native_language=native_name(getattr(user, "native_language", None)),
         target_language=target_language(getattr(user, "target_language", None)).name,
     )
+    # Long-term memory: who this learner is and what they keep getting wrong.
+    # `load_history` above only covers the current thread, so without this every
+    # new conversation greets a months-old learner as a stranger.
+    from app.ai.learner_memory import build_learner_memory, merge_into_prompt
+
+    system_prompt = merge_into_prompt(system_prompt, await build_learner_memory(db, user))
+
     if block := build_context_block(passages):
         system_prompt = f"{system_prompt}\n\n{block}"
 

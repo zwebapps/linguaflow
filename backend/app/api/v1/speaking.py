@@ -445,6 +445,12 @@ async def speaking_turn(
                 persona=scen["persona"], cefr=cefr
             )
             system = _system_prompt(rules, question_no=question_no)
+            # Same long-term memory the text tutor gets: the speaking partner
+            # should know the learner's name and weak areas rather than meeting
+            # them fresh every session.
+            from app.ai.learner_memory import build_learner_memory, merge_into_prompt
+
+            system = merge_into_prompt(system, await build_learner_memory(db, user))
             # The tutor must SEE the conversation so far — without history every
             # turn was stateless and the tutor asked the same questions again.
             # Last 20 messages keeps the context bounded on long threads.
