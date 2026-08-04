@@ -5,6 +5,7 @@ import {
   Brain,
   Database,
   FlaskConical,
+  Gauge,
   Menu,
   Rss,
   ScrollText,
@@ -26,6 +27,7 @@ const adminNav = [
   { to: "/admin/prompts", label: "Prompts", icon: ScrollText },
   { to: "/admin/feeds", label: "RSS feeds", icon: Rss },
   { to: "/admin/experiments", label: "A/B experiments", icon: FlaskConical },
+  { to: "/admin/evaluation", label: "RAG evaluation", icon: Gauge },
   { to: "/admin/usage", label: "Usage & cost", icon: Activity },
 ] as const;
 

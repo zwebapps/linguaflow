@@ -23,7 +23,15 @@ from app.ai.tasks import TaskType
 from app.core.config import settings
 from app.core.deps import CurrentAdmin, DbSession
 from app.core.errors import NotFound, UpstreamError, ValidationError
-from app.db.models import AIRoute, AIUsage, Document, ExperimentConfig, FeedSource, RagEvent
+from app.db.models import (
+    AIRoute,
+    AIUsage,
+    Document,
+    EvalRun,
+    ExperimentConfig,
+    FeedSource,
+    RagEvent,
+)
 from app.rag.experiments import DEFAULT_EXPERIMENT, summarise
 from app.rag.parsers import validate_public_url
 from app.rag.vector_store import get_vector_store
@@ -819,3 +827,120 @@ async def reset_prompt(key: str, db: DbSession, admin: CurrentAdmin) -> Response
         await db.commit()
         log.info("prompt_override_reset", key=key, admin_id=str(admin.id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── RAG evaluation ────────────────────────────────────────────────────────────
+# Runs the golden set (app/eval) on demand. Kicked off in the background and
+# polled, because a run is 14 cases × retrieval plus an LLM judge pass — 30-90s,
+# far past a comfortable request. The row IS the result, so a reload or a
+# browser timeout can't lose it, and the history answers "did that change move
+# nDCG?".
+
+
+class EvalRunOut(BaseModel):
+    id: str
+    status: str
+    strategy: str
+    k: int
+    judge: bool
+    n_cases: int
+    means: dict[str, float | None] | None
+    error: str | None
+    duration_ms: int | None
+    created_at: str
+
+
+class EvalRunRequest(BaseModel):
+    strategy: Literal["hybrid", "dense", "keyword"] = "hybrid"
+    k: int = Field(default=6, ge=1, le=20)
+    # The judge is the only way to measure faithfulness (does it refuse to
+    # confabulate?), but it costs one extra LLM call per case.
+    judge: bool = True
+
+
+def _eval_run_out(row: "EvalRun") -> EvalRunOut:
+    return EvalRunOut(
+        id=str(row.id),
+        status=row.status,
+        strategy=row.strategy,
+        k=row.k,
+        judge=row.judge,
+        n_cases=row.n_cases,
+        means=row.means,
+        error=row.error,
+        duration_ms=row.duration_ms,
+        created_at=row.created_at.isoformat(),
+    )
+
+
+async def _execute_eval_run(run_id: uuid.UUID) -> None:
+    """Background body. Owns its OWN session: the request's session is closed
+    by the time this runs."""
+    import time as _time
+
+    from app.db.session import SessionLocal
+    from app.eval.runner import run_eval
+
+    started = _time.perf_counter()
+    async with SessionLocal() as db:
+        row = await db.get(EvalRun, run_id)
+        if row is None:
+            return
+        try:
+            report = await run_eval(
+                db, strategy=row.strategy, k=row.k, judge=row.judge, user_id=row.started_by
+            )
+            row.means = report.means
+            row.n_cases = report.n_cases
+            row.strategy = report.strategy  # the RESOLVED strategy, not the request's
+            row.status = "completed"
+        except Exception as exc:  # noqa: BLE001 — the row must record the failure
+            log.exception("eval_run_failed", run_id=str(run_id))
+            row.status = "failed"
+            row.error = str(exc)[:500]
+        row.duration_ms = int((_time.perf_counter() - started) * 1000)
+        await db.commit()
+
+
+@router.post("/eval/runs", status_code=status.HTTP_202_ACCEPTED)
+async def start_eval_run(
+    payload: EvalRunRequest, db: DbSession, admin: CurrentAdmin
+) -> EvalRunOut:
+    # One at a time: concurrent runs would compete for the same models and
+    # muddy the comparison they exist to make.
+    running = (
+        await db.execute(select(EvalRun).where(EvalRun.status == "running"))
+    ).scalars().first()
+    if running is not None:
+        raise ValidationError("An evaluation is already running — wait for it to finish.")
+
+    row = EvalRun(
+        status="running",
+        strategy=payload.strategy,
+        k=payload.k,
+        judge=payload.judge,
+        started_by=admin.id,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+
+    asyncio.create_task(_execute_eval_run(row.id))
+    log.info("eval_run_started", run_id=str(row.id), strategy=row.strategy, judge=row.judge)
+    return _eval_run_out(row)
+
+
+@router.get("/eval/runs")
+async def list_eval_runs(
+    db: DbSession, admin: CurrentAdmin, limit: Annotated[int, Query(ge=1, le=50)] = 10
+) -> list[EvalRunOut]:
+    rows = (
+        (
+            await db.execute(
+                select(EvalRun).order_by(EvalRun.created_at.desc()).limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [_eval_run_out(r) for r in rows]

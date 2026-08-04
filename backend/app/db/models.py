@@ -110,6 +110,34 @@ class User(Base, TimestampMixin):
         return self.role == "admin"
 
 
+class EvalRun(Base, TimestampMixin):
+    """One execution of the RAG golden-set evaluation, triggered from /admin.
+
+    Persisted rather than returned inline because a run takes 30–90s (14 cases
+    × retrieval, plus an LLM judge pass): the request kicks it off and the UI
+    polls, so a browser timeout or a page reload can't lose the result. Rows
+    are also the history — "did last week's change move nDCG?".
+    """
+
+    __tablename__ = "eval_runs"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    status: Mapped[str] = mapped_column(String(20), default="running", nullable=False, index=True)
+    strategy: Mapped[str] = mapped_column(String(20), nullable=False)
+    k: Mapped[int] = mapped_column(Integer, nullable=False)
+    judge: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    n_cases: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Aggregated means: hit_rate, mrr, ndcg, context_precision/recall,
+    # faithfulness, answer_relevancy. Per-case rows are NOT stored — they are
+    # large, and the aggregate is what a regression check compares.
+    means: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    started_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
 class PromptOverride(Base, TimestampMixin):
     """Admin-customised AI prompt text; the code constant remains the default.
 
