@@ -11,7 +11,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "@/components/router-link";
-import { GraduationCap, RotateCcw, Search } from "lucide-react";
+import { GraduationCap, RotateCcw, Search, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { CefrBadge } from "@/components/shared/cefr-badge";
 import { ErrorAlert } from "@/components/shared/error-alert";
@@ -49,6 +49,13 @@ type SubmitResult = {
   expected: string;
   given: string;
 };
+type AddCardsResponse = {
+  added: number;
+  skipped_existing: number;
+  not_in_list: number;
+  capped: boolean;
+};
+
 type SubmitResponse = {
   score: number;
   correct: number;
@@ -76,6 +83,17 @@ export default function WordListDetailPage() {
       setAnswers({});
       setResult(null);
     },
+  });
+
+  // Turning the words you just got wrong into spaced-repetition cards is the
+  // whole point of testing — without this the deck stayed empty no matter how
+  // much vocabulary you imported.
+  const addCards = useMutation({
+    mutationFn: (terms: string[]) =>
+      apiFetch<AddCardsResponse>(`/wordlists/${id}/flashcards`, {
+        method: "POST",
+        json: { terms },
+      }),
   });
 
   const submit = useMutation({
@@ -176,6 +194,34 @@ export default function WordListDetailPage() {
                 )}
               </div>
             ))}
+          {result.results.some((r) => !r.correct) && (
+            <div className="panel flex flex-wrap items-center gap-3 rounded-lg p-3">
+              <Sparkles className="size-4 shrink-0 text-primary" />
+              <p className="min-w-0 flex-1 text-sm">
+                Practise the {result.results.filter((r) => !r.correct).length} you missed with
+                spaced repetition.
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={addCards.isPending || addCards.isSuccess}
+                onClick={() =>
+                  addCards.mutate(result.results.filter((r) => !r.correct).map((r) => r.term))
+                }
+              >
+                {addCards.isSuccess
+                  ? `Added ${addCards.data.added} to flashcards`
+                  : addCards.isPending
+                    ? "Adding…"
+                    : "Add to flashcards"}
+              </Button>
+            </div>
+          )}
+          {addCards.isSuccess && addCards.data.added > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Review them in Flashcards — they&apos;re due now.
+            </p>
+          )}
           <div className="flex gap-2">
             <Button className="gap-2" onClick={() => startTest.mutate()}>
               <RotateCcw className="size-4" />
@@ -210,6 +256,17 @@ export default function WordListDetailPage() {
             <Button className="gap-2" disabled={startTest.isPending} onClick={() => startTest.mutate()}>
               <GraduationCap className="size-4" />
               {startTest.isPending ? "Preparing…" : "Test me on these"}
+            </Button>
+            <Button
+              variant="outline"
+              className="gap-2"
+              disabled={addCards.isPending}
+              // Empty list = "all of them", capped server-side at 100 so a
+              // 492-word import can't bury the review queue.
+              onClick={() => addCards.mutate(data.entries.slice(0, 100).map((e) => e.term))}
+            >
+              <Sparkles className="size-4" />
+              {addCards.isPending ? "Adding…" : "Add to flashcards"}
             </Button>
           </div>
           {startTest.isError && (

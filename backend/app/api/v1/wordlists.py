@@ -278,3 +278,103 @@ async def submit_test(
         total=total,
         results=results,
     )
+
+
+# ── Turning a list into flashcards ────────────────────────────────────────────
+# Until now the ONLY route into the spaced-repetition deck was saving one word
+# at a time (the tutor's save_vocabulary tool, or tapping a word in the
+# Reader). A 492-entry list had no path in at all, so the deck stayed empty no
+# matter how much vocabulary a learner imported. These add words in bulk —
+# and because the list already carries the meaning, no dictionary lookup is
+# needed: it's a pure database write, instant and free.
+
+# One page of new cards. Dumping 492 words into a review queue at once would
+# bury the learner and make the SRS schedule meaningless.
+MAX_CARDS_PER_REQUEST = 100
+
+
+class AddCardsRequest(BaseModel):
+    # Empty = every word in the list, capped. Usually the terms a learner just
+    # got wrong in a test, which is where spaced repetition earns its keep.
+    terms: list[str] = Field(default_factory=list)
+
+
+class AddCardsResponse(BaseModel):
+    added: int
+    skipped_existing: int
+    not_in_list: int
+    capped: bool
+
+
+@router.post("/{document_id}/flashcards")
+async def add_to_flashcards(
+    document_id: uuid.UUID,
+    payload: AddCardsRequest,
+    db: DbSession,
+    user: CurrentUser,
+) -> AddCardsResponse:
+    """Create vocabulary entries + SRS cards for words from this list."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db.models import Flashcard, Vocabulary
+
+    _document, rows = await _load(db, document_id, user)
+    by_term = {r["term"]: r for r in rows if r.get("term")}
+
+    wanted = payload.terms or list(by_term)
+    selected = [t for t in wanted if t in by_term]
+    not_in_list = len(wanted) - len(selected)
+    capped = len(selected) > MAX_CARDS_PER_REQUEST
+    selected = selected[:MAX_CARDS_PER_REQUEST]
+
+    # One query for what the learner already has, rather than one per word.
+    existing = set(
+        (
+            await db.execute(
+                select(Vocabulary.lemma).where(
+                    Vocabulary.user_id == user.id,
+                    Vocabulary.language == user.target_language,
+                    Vocabulary.lemma.in_(selected),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    added = 0
+    for term in selected:
+        if term in existing:
+            continue
+        row = by_term[term]
+        vocab = Vocabulary(
+            user_id=user.id,
+            language=user.target_language,
+            lemma=term,
+            # The list already carries the meaning — no dictionary call needed.
+            meaning=row.get("gloss") or None,
+            source_document_id=document_id,
+        )
+        db.add(vocab)
+        try:
+            await db.flush()
+        except IntegrityError:
+            # Raced with another save of the same word; it exists now, so skip.
+            await db.rollback()
+            continue
+        db.add(Flashcard(user_id=user.id, vocabulary_id=vocab.id))
+        added += 1
+
+    await db.commit()
+    log.info(
+        "wordlist_cards_added",
+        user_id=str(user.id),
+        document_id=str(document_id),
+        added=added,
+    )
+    return AddCardsResponse(
+        added=added,
+        skipped_existing=len(existing),
+        not_in_list=not_in_list,
+        capped=capped,
+    )
