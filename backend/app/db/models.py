@@ -219,6 +219,12 @@ class Document(Base, TimestampMixin):
     )
     cefr_level: Mapped[str | None] = mapped_column(String(2), index=True)
     skill: Mapped[str | None] = mapped_column(String(20), index=True)
+    # "prose" | "wordlist". Stamped at ingest so the vocabulary section can
+    # find its documents with a WHERE clause instead of re-parsing every
+    # document's text on every request.
+    content_kind: Mapped[str] = mapped_column(
+        String(16), default="prose", server_default="prose", nullable=False, index=True
+    )
     collection: Mapped[str] = mapped_column(
         String(50), default="grammar_documents", nullable=False
     )

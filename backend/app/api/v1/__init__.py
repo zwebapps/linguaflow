@@ -20,6 +20,7 @@ from app.api.v1 import (
     tools,
     topics,
     vocab,
+    wordlists,
     writing,
 )
 
@@ -37,6 +38,7 @@ api_router.include_router(library.router, prefix="/library", tags=["library"])
 api_router.include_router(topics.router, prefix="/topics", tags=["topics"])
 api_router.include_router(materials.router, prefix="/materials", tags=["materials"])
 api_router.include_router(vocab.router, prefix="/vocab", tags=["vocabulary"])
+api_router.include_router(wordlists.router, prefix="/wordlists", tags=["vocabulary"])
 api_router.include_router(flashcards.router, prefix="/flashcards", tags=["flashcards"])
 # Assessment
 api_router.include_router(quiz.router, prefix="/quiz", tags=["quiz"])

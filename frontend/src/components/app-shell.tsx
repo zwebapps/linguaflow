@@ -8,6 +8,7 @@ import {
   ChevronUp,
   ClipboardList,
   LayoutDashboard,
+  BookA,
   Library,
   Menu,
   MessagesSquare,
@@ -55,6 +56,7 @@ const navSections: { label?: string; items: NavItem[] }[] = [
     items: [
       { to: "/reader", label: "Reader", icon: BookOpenText },
       { to: "/library", label: "Library", icon: Library },
+      { to: "/word-lists", label: "Word lists", icon: BookA },
       { to: "/vocabulary", label: "Vocabulary", icon: BookOpenText },
       { to: "/search", label: "Search", icon: Search },
     ],

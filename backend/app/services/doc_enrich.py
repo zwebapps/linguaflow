@@ -163,20 +163,28 @@ def append_glossary(content: str, entries: list[dict[str, str]]) -> str:
 
 
 async def enrich_document(db: AsyncSession, document: Document) -> bool:
-    """Add a level and a glossary if missing. Returns True if anything changed."""
+    """Classify the document and add the scaffolding it's missing.
+
+    Returns True if anything changed. Never raises: annotation is a bonus on
+    top of an already-usable document.
+    """
     content = (document.content_md or "").strip()
     if not content:
         return False
-    has_glossary = bool(re.search(r"^#{1,4}\s*glossar\s*$", content, re.I | re.M))
-    if document.cefr_level and has_glossary:
-        return False  # nothing to add
 
-    # The source's own label is more reliable than our judgement of a sample.
-    declared = level_from_label(document.title, content[:400])
+    # Classify FIRST — everything below branches on it, and the kind must be
+    # stamped even when there is nothing else to add.
+    kind = "wordlist" if looks_like_wordlist(content) else "prose"
+    has_glossary = bool(re.search(r"^#{1,4}\s*glossar\s*$", content, re.I | re.M))
+    # A word list IS a glossary; generating a 14-word one for a 500-entry verb
+    # table would be both wasteful and wrong.
+    wants_glossary = kind == "prose" and not has_glossary
+
+    # The source's own label beats our judgement of a sample.
+    level = document.cefr_level or level_from_label(document.title, content[:400])
 
     entries: list[dict[str, str]] = []
-    level = document.cefr_level or declared
-    if not has_glossary or not level:
+    if wants_glossary or not level:
         from langchain_core.messages import HumanMessage, SystemMessage
 
         from app.ai.languages import target as target_language
@@ -201,23 +209,28 @@ async def enrich_document(db: AsyncSession, document: Document) -> bool:
                 user_id=document.created_by,
             )
             parsed = parse_enrichment(result.text or "")
-            entries = parsed["glossary"]
             level = level or parsed["cefr_level"]
+            if wants_glossary:
+                entries = parsed["glossary"]
         except Exception as exc:  # noqa: BLE001 — annotation is a bonus
             log.warning(
                 "document_enrich_failed", document_id=str(document.id), error=str(exc)[:200]
             )
 
     changed = False
+    if document.content_kind != kind:
+        document.content_kind = kind
+        changed = True
     if level and not document.cefr_level:
         document.cefr_level = level
         changed = True
-    if entries and not has_glossary:
+    if entries:
         document.content_md = append_glossary(content, entries)
         changed = True
-    # Imported prose is reading practice unless an admin said otherwise.
+    # Imported prose is reading practice unless an admin said otherwise; a
+    # word list is reference vocabulary, which is a different shelf.
     if not document.skill:
-        document.skill = "reading"
+        document.skill = "vocabulary" if kind == "wordlist" else "reading"
         changed = True
 
     if changed:
@@ -225,6 +238,7 @@ async def enrich_document(db: AsyncSession, document: Document) -> bool:
         log.info(
             "document_enriched",
             document_id=str(document.id),
+            kind=kind,
             cefr_level=document.cefr_level,
             glossary=len(entries),
         )
