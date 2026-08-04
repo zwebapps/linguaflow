@@ -338,6 +338,8 @@ export type AdminUsageResponse = {
   };
   series: {
     key: string;
+    /** Human-readable name; set when grouping by user (key is a UUID). */
+    label?: string | null;
     tokens_in: number;
     tokens_out: number;
     cost_usd: number;

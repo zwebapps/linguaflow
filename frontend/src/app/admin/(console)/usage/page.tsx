@@ -110,14 +110,61 @@ export default function AdminUsagePage() {
           </div>
           <div className="h-72 rounded-lg border border-border bg-card p-4">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.series}>
+              {/* `name` carries the resolved label for user grouping — the raw
+                  key is a UUID nobody can read on an axis. */}
+              <BarChart data={data.series.map((p) => ({ ...p, name: p.label ?? p.key }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.3 0.02 260)" />
-                <XAxis dataKey="key" fontSize={11} tick={{ fill: "oklch(0.7 0.02 260)" }} />
+                <XAxis dataKey="name" fontSize={11} tick={{ fill: "oklch(0.7 0.02 260)" }} />
                 <YAxis fontSize={11} tick={{ fill: "oklch(0.7 0.02 260)" }} />
                 <Tooltip />
                 <Bar dataKey="cost_usd" fill="oklch(0.76 0.115 195)" name="Cost USD" />
               </BarChart>
             </ResponsiveContainer>
+          </div>
+
+          <div className="rounded-lg border border-border bg-card p-4">
+            <p className="label-mono mb-3">
+              Breakdown by {groupBy === "user" ? "learner" : groupBy}
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                    <th className="py-2 pr-3 font-medium">
+                      {groupBy === "user" ? "Learner" : groupBy === "day" ? "Day" : groupBy}
+                    </th>
+                    <th className="py-2 pr-3 text-right font-medium">Calls</th>
+                    <th className="py-2 pr-3 text-right font-medium">Tokens in / out</th>
+                    <th className="py-2 text-right font-medium">Cost (USD)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...data.series]
+                    .sort((a, b) => b.cost_usd - a.cost_usd)
+                    .map((p) => (
+                      <tr key={p.key} className="border-b border-border/50 last:border-b-0">
+                        <td className="py-2 pr-3">
+                          <span>{p.label ?? p.key}</span>
+                          {p.label && p.label !== p.key && (
+                            // Keep the id visible but subordinate — support
+                            // still needs it to look a specific account up.
+                            <span className="ml-2 font-mono text-[10px] text-muted-foreground">
+                              {p.key.slice(0, 8)}…
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 text-right font-mono text-xs">{p.calls}</td>
+                        <td className="py-2 pr-3 text-right font-mono text-xs">
+                          {p.tokens_in.toLocaleString()} / {p.tokens_out.toLocaleString()}
+                        </td>
+                        <td className="py-2 text-right font-mono text-xs">
+                          ${p.cost_usd.toFixed(4)}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

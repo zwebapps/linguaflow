@@ -31,6 +31,7 @@ from app.db.models import (
     ExperimentConfig,
     FeedSource,
     RagEvent,
+    User,
 )
 from app.rag.experiments import DEFAULT_EXPERIMENT, summarise
 from app.rag.parsers import validate_public_url
@@ -138,6 +139,11 @@ class UsageTotal(BaseModel):
 
 class UsageSeriesPoint(BaseModel):
     key: str
+    # Human-readable rendering of `key`. Only set for group_by="user", where
+    # the key is a UUID: a dashboard row reading
+    # "ae3b1634-f6b3-4704-ba89-2c2b9f060372" tells an admin nothing about who
+    # is spending the budget. `key` stays the stable id for the client.
+    label: str | None = None
     tokens_in: int
     tokens_out: int
     cost_usd: float
@@ -527,7 +533,28 @@ async def get_usage(
         stmt = stmt.where(AIUsage.created_at <= to)
 
     rows = (await db.execute(stmt)).scalars().all()
-    return aggregate_usage(list(rows), group_by)
+    result = aggregate_usage(list(rows), group_by)
+
+    if group_by == "user":
+        # Resolve ids → names in ONE query, after aggregation, so
+        # `aggregate_usage` stays a pure, DB-free, unit-testable function.
+        ids = [uuid.UUID(p.key) for p in result.series if p.key != "anonymous"]
+        if ids:
+            users = (
+                (await db.execute(select(User).where(User.id.in_(ids)))).scalars().all()
+            )
+            names = {
+                str(u.id): (u.display_name or u.email or str(u.id)) for u in users
+            }
+            for point in result.series:
+                # A deleted user's rows survive (usage is an audit trail), so
+                # fall back to a marker rather than dropping the spend.
+                point.label = (
+                    "Anonymous / system"
+                    if point.key == "anonymous"
+                    else names.get(point.key, "Deleted user")
+                )
+    return result
 
 
 # ── Feeds ──────────────────────────────────────────────────────────────────────
