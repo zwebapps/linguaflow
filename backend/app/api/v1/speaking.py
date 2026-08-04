@@ -37,7 +37,7 @@ from app.ai.tasks import TaskType
 from app.core.cache import bump_quota, enforce_monthly_quota, enforce_rate_limit
 from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
-from app.core.errors import NotFound, ValidationError
+from app.core.errors import NotFound, UpstreamError, ValidationError
 from app.db.models import Message, Thread
 from app.services import pronunciation as pron
 
@@ -391,13 +391,40 @@ async def speaking_turn(
                 "status", {"stage": "transcribing", "label": "Listening to your recording…"}
             )
             stt_policy = await load_policy(db, str(TaskType.SPEECH_TO_TEXT))
-            transcript = await audio_mod.transcribe(
-                raw,
-                filename=filename,
-                content_type=content_type,
-                model=stt_policy.primary_model,
-                language=stt_policy.params.get("language") or settings.SPEECH_LANGUAGE,
-            )
+            try:
+                transcript = await audio_mod.transcribe(
+                    raw,
+                    filename=filename,
+                    content_type=content_type,
+                    model=stt_policy.primary_model,
+                    language=stt_policy.params.get("language") or settings.SPEECH_LANGUAGE,
+                )
+            except UpstreamError as exc:
+                # A silent or unintelligible recording is a NORMAL event in a
+                # hands-free conversation (a cough, a false VAD trigger, someone
+                # thinking out loud). It must not end the session or burn one of
+                # the ten questions — the tutor simply asks them to repeat, and
+                # because no assistant message is persisted, the counter holds.
+                log.info("speaking_turn_unintelligible", thread_id=str(thread.id), error=str(exc))
+                retry_line = "Entschuldigung, das habe ich nicht verstanden. Können Sie das bitte wiederholen?"
+                yield _sse("transcript", {"text": "", "model": None, "duration_s": 0})
+                for piece in retry_line.split(" "):
+                    yield _sse("token", {"text": piece + " "})
+                if want_audio:
+                    yield _sse(
+                        "audio",
+                        {"data_uri": None, "use_browser_tts": True, "text": retry_line, "lang": "de-DE"},
+                    )
+                yield _sse(
+                    "done",
+                    {
+                        "message_id": None,
+                        "thread_id": str(thread.id),
+                        "session_complete": False,
+                        "retry": True,
+                    },
+                )
+                return
             yield _sse(
                 "transcript",
                 {
@@ -565,6 +592,38 @@ async def speaking_turn(
                 ),
             )
 
+            # ── 6. End-of-session feedback ────────────────────────────────────
+            # The tenth turn closes the exercise. Everything above is in-character
+            # German; THIS is the coach stepping out of the role-play, so it is
+            # written in the learner's own language and spoken aloud — a learner
+            # who can't yet read a German critique can't act on it.
+            if question_no >= SESSION_QUESTIONS:
+                try:
+                    summary = await _session_feedback(
+                        db,
+                        thread_id=thread.id,
+                        user=user,
+                        cefr=cefr,
+                        scenario=scenario,
+                        latest_scores=scores,
+                        latest_corrections=corrections,
+                    )
+                    yield _sse("session_feedback", summary)
+                    if want_audio and summary.get("text"):
+                        yield _sse(
+                            "audio",
+                            {
+                                "data_uri": None,
+                                "use_browser_tts": True,
+                                "text": summary["text"],
+                                # Spoken in the learner's language, not de-DE.
+                                "lang": summary.get("lang") or "en-US",
+                                "role": "feedback",
+                            },
+                        )
+                except Exception as exc:  # noqa: BLE001 — feedback is a bonus, not the turn
+                    log.warning("speaking_session_feedback_failed", error=str(exc)[:200])
+
             yield _sse("usage", usage)
             yield _sse(
                 "done",
@@ -587,3 +646,110 @@ async def speaking_turn(
             )
 
     return EventSourceResponse(event_source(), ping=15000)
+
+
+# ── End-of-session feedback ───────────────────────────────────────────────────
+
+
+# Best-effort BCP-47 for the browser's speech synthesiser. Unknown codes fall
+# back to English rather than reading the feedback in a German voice.
+_SPEECH_LANG = {
+    "en": "en-US", "de": "de-DE", "tr": "tr-TR", "es": "es-ES", "fr": "fr-FR",
+    "it": "it-IT", "pt": "pt-PT", "pl": "pl-PL", "ru": "ru-RU", "uk": "uk-UA",
+    "ar": "ar-SA", "fa": "fa-IR", "ur": "ur-PK", "hi": "hi-IN", "zh": "zh-CN",
+    "ja": "ja-JP", "ko": "ko-KR", "vi": "vi-VN", "id": "id-ID", "ro": "ro-RO",
+}
+
+_FEEDBACK_INSTRUCTION = (
+    "You are a warm, concrete speaking coach. The learner has just finished a "
+    "{n}-turn German conversation at CEFR {cefr}. Write 3-4 SHORT sentences of "
+    "spoken feedback in {native_language}: what they did well, the single most "
+    "useful thing to fix (name the actual pattern from the corrections), and one "
+    "encouraging closing line. It will be READ ALOUD — plain prose only, no "
+    "markdown, no lists, no headings, no emoji."
+)
+
+
+async def _session_feedback(
+    db: Any,
+    *,
+    thread_id: Any,
+    user: Any,
+    cefr: str,
+    scenario: str,
+    latest_scores: Any,
+    latest_corrections: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Generate + persist the wrap-up. Returns the SSE payload."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from app.ai.languages import native_name
+    from app.db.models import SpeakingSession
+
+    native_code = (getattr(user, "native_language", None) or "en").lower()
+    native = native_name(native_code)
+
+    # Everything the learner said this session, as material for the coach.
+    rows = (
+        (
+            await db.execute(
+                select(Message)
+                .where(Message.thread_id == thread_id, Message.role == "user")
+                .order_by(Message.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    utterances = [m.content for m in rows][-SESSION_QUESTIONS:]
+    corrections_text = "\n".join(
+        f"- {c.get('original')} → {c.get('suggestion')}: {c.get('explanation')}"
+        for c in latest_corrections
+    ) or "(no corrections recorded on the final turn)"
+
+    result = await complete(
+        db,
+        task_type=TaskType.CONVERSATION,
+        messages=[
+            SystemMessage(
+                content=_FEEDBACK_INSTRUCTION.format(
+                    n=len(utterances), cefr=cefr, native_language=native
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"Scenario: {SCENARIOS.get(scenario, {}).get('title', scenario)}\n"
+                    f"What the learner said:\n"
+                    + "\n".join(f"- {u}" for u in utterances)
+                    + f"\n\nCorrections from the last turn:\n{corrections_text}"
+                )
+            ),
+        ],
+        user_id=user.id,
+    )
+    text = (result.text or "").strip() or (
+        f"Great work finishing the session! Keep practising at {cefr}."
+    )
+
+    session = SpeakingSession(
+        user_id=user.id,
+        thread_id=thread_id,
+        scenario=scenario,
+        cefr_level=cefr,
+        turns=len(utterances),
+        overall=float(getattr(latest_scores, "overall", 0.0) or 0.0),
+        grammar=float(getattr(latest_scores, "grammar", 0.0) or 0.0),
+        fluency=float(getattr(latest_scores, "fluency", 0.0) or 0.0),
+        feedback=text,
+        corrections=latest_corrections or None,
+    )
+    db.add(session)
+    await db.commit()
+    log.info("speaking_session_completed", user_id=str(user.id), turns=len(utterances))
+
+    return {
+        "text": text,
+        "lang": _SPEECH_LANG.get(native_code, "en-US"),
+        "turns": len(utterances),
+        "cefr_level": cefr,
+    }

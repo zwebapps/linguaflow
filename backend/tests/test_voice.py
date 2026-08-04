@@ -280,3 +280,55 @@ async def test_tts_500_is_a_plain_upstream_error():
     with pytest.raises(UpstreamError) as exc:
         await audio_mod.synthesize("Guten Tag.")
     assert not isinstance(exc.value, audio_mod.SpeechUnavailable)
+
+
+# ── Silent-turn recovery ──────────────────────────────────────────────────────
+
+
+def test_unintelligible_turn_is_a_retry_not_a_dead_session() -> None:
+    """Regression: a silent recording at question 10/10 surfaced
+    "Nothing was transcribed — the recording may be silent." as an SSE `error`
+    and the session ended with no wrap-up and no feedback.
+
+    A hands-free conversation WILL produce silent turns — a cough, a false VAD
+    trigger, someone thinking out loud. The handler must ask the learner to
+    repeat, keep the session alive, and NOT consume one of the ten questions.
+    The counter is derived from persisted assistant messages, so "don't consume
+    a question" means: return before anything is written.
+    """
+    import inspect
+
+    from app.api.v1 import speaking
+
+    src = inspect.getsource(speaking.speaking_turn)
+    # Just the handler body: from the except clause to the `return` that ends it.
+    after_except = src.split("except UpstreamError")[1]
+    retry_block = after_except.split("return", 1)[0]
+
+    # Asks them to repeat, in character and in German…
+    assert "wiederholen" in retry_block
+    # …tells the client this was a retry, not a completed exchange…
+    assert '"retry": True' in retry_block
+    assert '"session_complete": False' in retry_block
+    # …and returns BEFORE persisting, so the question counter holds.
+    assert "return" in after_except
+    assert "db.add(" not in retry_block
+
+
+def test_session_feedback_is_spoken_in_the_learners_language() -> None:
+    """The wrap-up coaches; it is not part of the German role-play.
+
+    A learner who cannot yet read a German critique cannot act on it, so the
+    feedback is generated in their native language AND the audio frame carries
+    that language — otherwise the browser reads English coaching with a German
+    voice, which is barely intelligible.
+    """
+    from app.api.v1.speaking import _FEEDBACK_INSTRUCTION, _SPEECH_LANG
+
+    assert "{native_language}" in _FEEDBACK_INSTRUCTION
+    # Read aloud → no markdown artefacts.
+    assert "READ ALOUD" in _FEEDBACK_INSTRUCTION
+    assert "no markdown" in _FEEDBACK_INSTRUCTION
+    # A few languages the app supports must map to a real BCP-47 tag.
+    for code, tag in (("tr", "tr-TR"), ("de", "de-DE"), ("ar", "ar-SA")):
+        assert _SPEECH_LANG[code] == tag

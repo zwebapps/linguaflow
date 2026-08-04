@@ -19,7 +19,15 @@ from sqlalchemy import func, select
 
 from app.core.cache import quota_state
 from app.core.deps import CurrentUser, DbSession
-from app.db.models import Activity, AIUsage, Quiz, TopicStat, Vocabulary, WritingSubmission
+from app.db.models import (
+    Activity,
+    AIUsage,
+    Quiz,
+    SpeakingSession,
+    TopicStat,
+    Vocabulary,
+    WritingSubmission,
+)
 from app.services.scoring import (
     derive_skill_scores,
     estimate_cefr_from_score,
@@ -94,6 +102,20 @@ class UsageOut(BaseModel):
     quota: QuotaOut
 
 
+class SpeakingSessionOut(BaseModel):
+    """A finished spoken session — the one skill that had no history before."""
+
+    id: str
+    scenario: str
+    cefr_level: str
+    turns: int
+    overall: float
+    grammar: float
+    fluency: float
+    feedback: str | None
+    created_at: str
+
+
 class AnalysisResponse(BaseModel):
     cefr_level: str
     skills: SkillsOut
@@ -101,6 +123,7 @@ class AnalysisResponse(BaseModel):
     activity: list[ActivityDayOut]
     weak_spots: list[WeakSpotOut]
     cefr_trend: list[CefrTrendPointOut]
+    speaking_sessions: list[SpeakingSessionOut]
     usage: UsageOut
 
 
@@ -215,6 +238,20 @@ async def get_analysis(db: DbSession, user: CurrentUser) -> AnalysisResponse:
 
     quota = await quota_state(str(user.id))
 
+    # Recent spoken sessions — the progress page's speaking history.
+    speaking_rows = (
+        (
+            await db.execute(
+                select(SpeakingSession)
+                .where(SpeakingSession.user_id == user.id)
+                .order_by(SpeakingSession.created_at.desc())
+                .limit(10)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     return AnalysisResponse(
         cefr_level=user.cefr_level,
         skills=SkillsOut(**skills),
@@ -228,6 +265,20 @@ async def get_analysis(db: DbSession, user: CurrentUser) -> AnalysisResponse:
         activity=activity,
         weak_spots=[WeakSpotOut(**w) for w in weak],
         cefr_trend=[CefrTrendPointOut(**t) for t in trend],
+        speaking_sessions=[
+            SpeakingSessionOut(
+                id=str(r.id),
+                scenario=r.scenario,
+                cefr_level=r.cefr_level,
+                turns=r.turns,
+                overall=r.overall,
+                grammar=r.grammar,
+                fluency=r.fluency,
+                feedback=r.feedback,
+                created_at=r.created_at.isoformat(),
+            )
+            for r in speaking_rows
+        ],
         usage=UsageOut(
             tokens_in=int(tokens_in),
             tokens_out=int(tokens_out),

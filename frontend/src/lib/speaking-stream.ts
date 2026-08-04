@@ -6,6 +6,7 @@ import type {
   SpeakingStreamAudio,
   SpeakingStreamDone,
   SpeakingStreamError,
+  SpeakingStreamFeedback,
   SpeakingStreamScores,
   SpeakingStreamStart,
   SpeakingStreamStatus,
@@ -21,6 +22,7 @@ export type SpeakingStreamHandlers = {
   onScores: (d: SpeakingStreamScores) => void;
   onAudio: (d: SpeakingStreamAudio) => void;
   onUsage: (d: SpeakingStreamUsage) => void;
+  onSessionFeedback?: (d: SpeakingStreamFeedback) => void;
   onDone: (d: SpeakingStreamDone) => void;
   onError: (d: SpeakingStreamError) => void;
 };
@@ -50,6 +52,7 @@ function dispatchFrame(frame: string, handlers: SpeakingStreamHandlers) {
     scores: handlers.onScores as (p: never) => void,
     audio: handlers.onAudio as (p: never) => void,
     usage: handlers.onUsage as (p: never) => void,
+    session_feedback: (handlers.onSessionFeedback ?? (() => {})) as (p: never) => void,
     done: handlers.onDone as (p: never) => void,
     error: handlers.onError as (p: never) => void,
   };
@@ -94,11 +97,13 @@ export async function streamSpeakingTurn(
  */
 let cachedVoices: SpeechSynthesisVoice[] = [];
 
-function germanVoice(): SpeechSynthesisVoice | undefined {
+/** A voice for `lang` ("de-DE", "tr-TR", …), matching on the language prefix. */
+function voiceFor(lang: string): SpeechSynthesisVoice | undefined {
   const voices = speechSynthesis.getVoices();
   if (voices.length) cachedVoices = voices;
   const pool = voices.length ? voices : cachedVoices;
-  return pool.find((v) => v.lang.toLowerCase().startsWith("de"));
+  const prefix = lang.slice(0, 2).toLowerCase();
+  return pool.find((v) => v.lang.toLowerCase().startsWith(prefix));
 }
 
 export function primeSpeechVoices(): void {
@@ -121,9 +126,11 @@ export function playSpeakingAudio(payload: SpeakingStreamAudio, muted: boolean):
   if (payload.use_browser_tts && payload.text) {
     return new Promise((resolve) => {
       const u = new SpeechSynthesisUtterance(payload.text ?? "");
+      // End-of-session feedback arrives with the LEARNER's language, not de-DE
+      // — reading English coaching in a German voice is barely intelligible.
       u.lang = payload.lang ?? "de-DE";
-      const de = germanVoice();
-      if (de) u.voice = de;
+      const voice = voiceFor(u.lang);
+      if (voice) u.voice = voice;
       // Slightly slower than default: this is a language learner listening, and
       // the platform default rate is brisk for someone at A1/A2.
       u.rate = 0.95;

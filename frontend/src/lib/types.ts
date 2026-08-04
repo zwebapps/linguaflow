@@ -278,6 +278,17 @@ export type AnalysisResponse = {
     document_id: string | null;
   }[];
   cefr_trend: { day: string; estimate: CefrLevel }[];
+  speaking_sessions: {
+    id: string;
+    scenario: string;
+    cefr_level: CefrLevel;
+    turns: number;
+    overall: number;
+    grammar: number;
+    fluency: number;
+    feedback: string | null;
+    created_at: string;
+  }[];
   usage: {
     tokens_in: number;
     tokens_out: number;
@@ -446,8 +457,18 @@ export type SpeakingStreamUsage = {
   latency_ms: number;
 };
 export type SpeakingStreamDone = {
-  message_id: string;
+  message_id: string | null;
   thread_id: string;
   session_complete?: boolean;
+  /** True when the turn was unintelligible: no question was consumed. */
+  retry?: boolean;
+};
+
+/** The coach's spoken wrap-up after the final turn, in the learner's language. */
+export type SpeakingStreamFeedback = {
+  text: string;
+  lang: string;
+  turns: number;
+  cefr_level: string;
 };
 export type SpeakingStreamError = { code: string; message: string };

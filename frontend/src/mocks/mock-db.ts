@@ -304,6 +304,7 @@ export const analysisSnapshot: AnalysisResponse = {
       document_id: "doc-dativ",
     },
   ],
+  speaking_sessions: [],
   cefr_trend: [
     { day: "2026-07-01", estimate: "A2" },
     { day: "2026-07-15", estimate: "B1" },

@@ -110,6 +110,35 @@ class User(Base, TimestampMixin):
         return self.role == "admin"
 
 
+class SpeakingSession(Base, TimestampMixin):
+    """A completed 10-question spoken session and its end-of-session feedback.
+
+    Persisted so the learner's progress page can show speaking history —
+    otherwise the summary lived only in browser state and vanished on reload,
+    which made speaking the one skill with no record.
+    """
+
+    __tablename__ = "speaking_sessions"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    thread_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("threads.id", ondelete="SET NULL")
+    )
+    scenario: Mapped[str] = mapped_column(String(40), nullable=False)
+    cefr_level: Mapped[str] = mapped_column(String(2), nullable=False)
+    turns: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # Averaged over the session's scored turns.
+    overall: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    grammar: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    fluency: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    # The spoken wrap-up, in the learner's own language.
+    feedback: Mapped[str | None] = mapped_column(Text)
+    corrections: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+
+
 class EvalRun(Base, TimestampMixin):
     """One execution of the RAG golden-set evaluation, triggered from /admin.
 

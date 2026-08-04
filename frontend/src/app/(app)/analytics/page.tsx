@@ -25,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { cefrCoverage, judgeRuns, usageSeries } from "@/data/deutschflow";
+import { cefrCoverage, usageSeries } from "@/data/deutschflow";
 import { apiFetch } from "@/lib/api";
 import type { AnalysisResponse } from "@/lib/types";
 import { ErrorAlert } from "@/components/shared/error-alert";
@@ -128,35 +128,37 @@ export default function AnalyticsPage() {
         </div>
 
         <div className="panel rounded-lg p-5">
-          <p className="label-mono mb-4">Answer quality checks (sample)</p>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Session</TableHead>
-                <TableHead>Helper</TableHead>
-                <TableHead className="text-right">Accuracy</TableHead>
-                <TableHead className="text-right">Helpfulness</TableHead>
-                <TableHead className="text-right">Level fit</TableHead>
-                <TableHead className="text-right">Unsure parts</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {judgeRuns.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="text-xs text-muted-foreground">{r.id.replace("run_", "Session ")}</TableCell>
-                  <TableCell className="text-xs">{r.model.split("-")[0] ?? r.model}</TableCell>
-                  <TableCell className="text-right">{r.acc}%</TableCell>
-                  <TableCell className="text-right">{r.rel}%</TableCell>
-                  <TableCell className="text-right">{r.cefr}%</TableCell>
-                  <TableCell
-                    className={`text-right ${r.hall <= 5 ? "text-success" : "text-warning"}`}
-                  >
-                    {r.hall}%
-                  </TableCell>
-                </TableRow>
+          <p className="label-mono mb-1">Speaking sessions</p>
+          <p className="mb-4 text-xs text-muted-foreground">
+            Your finished 10-question conversations and the coach&apos;s wrap-up.
+          </p>
+          {!data?.speaking_sessions?.length ? (
+            <p className="text-sm text-muted-foreground">
+              No sessions yet — finish a conversation in Speaking and it appears here.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {data.speaking_sessions.map((s) => (
+                <div key={s.id} className="rounded-lg border border-border/70 p-3">
+                  <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-medium capitalize">{s.scenario.replace(/_/g, " ")}</span>
+                    <Badge variant="outline" className="text-[10px]">{s.cefr_level}</Badge>
+                    <span className="text-muted-foreground">{s.turns} turns</span>
+                    <span className="text-muted-foreground">
+                      {new Date(s.created_at).toLocaleDateString()}
+                    </span>
+                    <span className="ml-auto font-mono">
+                      overall {Math.round(s.overall * 100)}% · grammar{" "}
+                      {Math.round(s.grammar * 100)}% · fluency {Math.round(s.fluency * 100)}%
+                    </span>
+                  </div>
+                  {s.feedback && (
+                    <p className="text-xs leading-relaxed text-muted-foreground">🎧 {s.feedback}</p>
+                  )}
+                </div>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+          )}
         </div>
       </div>
     </AppShell>

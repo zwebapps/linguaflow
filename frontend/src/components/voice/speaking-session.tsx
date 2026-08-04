@@ -148,6 +148,8 @@ export function SpeakingSession({
   const [turn, setTurn] = useState(1);
   const [totalTurns, setTotalTurns] = useState(10);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
+  // The coach's end-of-session wrap-up (spoken + shown).
+  const [coachFeedback, setCoachFeedback] = useState<string | null>(null);
   const [turns, setTurns] = useState<TurnRecord[]>([]);
   const turnScoresRef = useRef<SpeakingStreamScores[]>([]);
   const completeRef = useRef(false);
@@ -232,6 +234,7 @@ export function SpeakingSession({
     setThreadId(null);
     setTurn(1);
     setSummary(null);
+    setCoachFeedback(null);
     turnScoresRef.current = [];
     clearTurns();
   }, [scenarioId, clearTurns]);
@@ -364,12 +367,20 @@ export function SpeakingSession({
             onAudio: (d) => {
               setPhase("replying");
               setStatusLabel(null);
-              playback = playSpeakingAudio(d, mutedRef.current);
+              // The final turn emits TWO audio frames (in-character goodbye,
+              // then the coach's feedback). Chain, don't replace, or the
+              // second cuts the first off and the await returns early.
+              const prev = playback;
+              playback = prev.then(() => playSpeakingAudio(d, mutedRef.current));
             },
+            onSessionFeedback: (d) => setCoachFeedback(d.text),
             onUsage: (d) => setUsage(d),
             onDone: (d) => {
               setStatusLabel(null);
               completeRef.current = d.session_complete === true;
+              // An unintelligible turn: the tutor asked them to repeat and no
+              // question was consumed, so drop the dud from the turn list.
+              if (d.retry) setTurns((prev) => prev.filter((t) => t.id !== turnId));
             },
             onError: (d) => {
               setError(d.message);
@@ -485,6 +496,7 @@ export function SpeakingSession({
     setThreadId(null);
     setTurn(1);
     setSummary(null);
+    setCoachFeedback(null);
     turnScoresRef.current = [];
     clearTurns();
     completeRef.current = false;
@@ -633,6 +645,13 @@ export function SpeakingSession({
               <p className="label-mono">Session complete 🎉</p>
               <Badge variant="secondary">{summary.turns} turns</Badge>
             </div>
+            {coachFeedback && (
+              // Spoken aloud in the learner's own language as it appears —
+              // shown too, so it can be re-read after the audio has passed.
+              <p className="rounded-lg bg-primary/10 p-3 text-sm leading-relaxed">
+                🎧 {coachFeedback}
+              </p>
+            )}
             <ul className="space-y-1 text-sm">
               <li>Overall · {Math.round(summary.overall * 100)}%</li>
               <li>Grammar · {Math.round(summary.grammar * 100)}%</li>
