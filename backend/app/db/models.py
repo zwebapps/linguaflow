@@ -128,9 +128,14 @@ class EvalRun(Base, TimestampMixin):
     judge: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     n_cases: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Aggregated means: hit_rate, mrr, ndcg, context_precision/recall,
-    # faithfulness, answer_relevancy. Per-case rows are NOT stored — they are
-    # large, and the aggregate is what a regression check compares.
+    # faithfulness, answer_relevancy.
     means: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Per-case detail — question, retrieved vs expected docs, the generated
+    # answer and its judge scores. ~20 KB for the 14-case set, and it is the
+    # only way to see WHY a score moved: an aggregate can't show you the model
+    # correctly answering "das weiß ich nicht" on an unanswerable question.
+    # Served from a separate detail endpoint so the list stays light.
+    cases: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(Text)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     started_by: Mapped[uuid.UUID | None] = mapped_column(

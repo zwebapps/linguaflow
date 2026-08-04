@@ -891,6 +891,7 @@ async def _execute_eval_run(run_id: uuid.UUID) -> None:
                 db, strategy=row.strategy, k=row.k, judge=row.judge, user_id=row.started_by
             )
             row.means = report.means
+            row.cases = [r.as_dict() for r in report.rows]
             row.n_cases = report.n_cases
             row.strategy = report.strategy  # the RESOLVED strategy, not the request's
             row.status = "completed"
@@ -944,3 +945,38 @@ async def list_eval_runs(
         .all()
     )
     return [_eval_run_out(r) for r in rows]
+
+
+class EvalCaseOut(BaseModel):
+    """One golden-set case as the judge saw it."""
+
+    question: str
+    cefr_level: str
+    relevant_doc_titles: list[str]
+    retrieved_titles: list[str]
+    hit_rate: float
+    ndcg: float
+    generated_answer: str | None
+    faithfulness: float | None
+    answer_relevancy: float | None
+
+
+class EvalRunDetailOut(EvalRunOut):
+    cases: list[EvalCaseOut]
+
+
+@router.get("/eval/runs/{run_id}")
+async def get_eval_run(
+    run_id: uuid.UUID, db: DbSession, admin: CurrentAdmin
+) -> EvalRunDetailOut:
+    """Full per-case detail — what was asked, what the model answered, how the
+    judge scored it. This is the view that makes 'faithfulness 1.0' auditable
+    rather than a number you have to trust."""
+    row = await db.get(EvalRun, run_id)
+    if row is None:
+        raise NotFound("No such evaluation run.")
+    base = _eval_run_out(row)
+    return EvalRunDetailOut(
+        **base.model_dump(),
+        cases=[EvalCaseOut(**{k: c.get(k) for k in EvalCaseOut.model_fields}) for c in (row.cases or [])],
+    )

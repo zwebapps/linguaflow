@@ -10,7 +10,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { FlaskConical, Play } from "lucide-react";
+import { FlaskConical, Play, ScrollText } from "lucide-react";
 import { AdminShell } from "@/components/admin-shell";
 import { ErrorAlert } from "@/components/shared/error-alert";
 import { Spinner } from "@/components/shared/spinner";
@@ -38,6 +38,95 @@ type EvalRun = {
   created_at: string;
 };
 
+type EvalCase = {
+  question: string;
+  cefr_level: string;
+  relevant_doc_titles: string[];
+  retrieved_titles: string[];
+  hit_rate: number;
+  ndcg: number;
+  generated_answer: string | null;
+  faithfulness: number | null;
+  answer_relevancy: number | null;
+};
+
+type EvalRunDetail = EvalRun & { cases: EvalCase[] };
+
+/** Per-case judge detail — what was asked, what the model answered, how it scored. */
+function JudgeDetail({ runId }: { runId: string }) {
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ["admin-eval-run", runId],
+    queryFn: () => apiFetch<EvalRunDetail>(`/admin/eval/runs/${runId}`),
+  });
+
+  if (isLoading) return <Spinner label="Loading cases…" />;
+  if (isError)
+    return (
+      <ErrorAlert message={error instanceof Error ? error.message : "Could not load cases"} />
+    );
+  if (!data?.cases.length)
+    return <p className="text-sm text-muted-foreground">No per-case detail stored for this run.</p>;
+
+  return (
+    <ul className="space-y-3">
+      {data.cases.map((c, i) => {
+        // The golden set's unanswerable cases have no relevant document by
+        // design — they exist to catch confabulation, so they're the most
+        // interesting rows to read, not noise to hide.
+        const unanswerable = c.relevant_doc_titles.length === 0;
+        return (
+          <li
+            key={i}
+            className={`rounded-lg border p-3 ${
+              unanswerable ? "border-primary/40 bg-primary/5" : "border-border/70"
+            }`}
+          >
+            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="text-[10px]">
+                {c.cefr_level}
+              </Badge>
+              {unanswerable && (
+                <Badge variant="secondary" className="text-[10px]">
+                  unanswerable by design
+                </Badge>
+              )}
+              {c.faithfulness !== null && (
+                <Badge
+                  variant={c.faithfulness >= 0.8 ? "secondary" : "destructive"}
+                  className="text-[10px]"
+                >
+                  faithfulness {pct(c.faithfulness)}
+                </Badge>
+              )}
+              {c.answer_relevancy !== null && (
+                <Badge variant="outline" className="text-[10px]">
+                  relevancy {pct(c.answer_relevancy)}
+                </Badge>
+              )}
+              <span className="font-mono text-[10px] text-muted-foreground">
+                hit {c.hit_rate ? "✓" : "✗"} · nDCG {c.ndcg.toFixed(2)}
+              </span>
+            </div>
+            <p className="text-sm font-medium">{c.question}</p>
+            {c.generated_answer && (
+              <p className="mt-1.5 whitespace-pre-wrap rounded bg-muted/50 p-2 text-xs leading-relaxed">
+                {c.generated_answer}
+              </p>
+            )}
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              <span className="font-medium">Expected:</span>{" "}
+              {c.relevant_doc_titles.join(", ") || "— (nothing in the corpus covers this)"}
+              {" · "}
+              <span className="font-medium">Retrieved:</span>{" "}
+              {c.retrieved_titles.slice(0, 4).join(", ") || "none"}
+            </p>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 // Order matters: retrieval quality first, then the generation-side judge.
 const METRICS: { key: string; label: string; hint: string }[] = [
   { key: "hit_rate", label: "Hit rate", hint: "Any relevant doc in the top k" },
@@ -62,6 +151,8 @@ export default function AdminEvaluationPage() {
   // Driven by plain state (set from the fetched rows) rather than reading the
   // query off its own options callback, which silently never re-armed.
   const [polling, setPolling] = useState(false);
+  // Which run's per-case judge detail is expanded (null = collapsed).
+  const [openCases, setOpenCases] = useState<string | null>(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["admin-eval-runs"],
@@ -174,6 +265,29 @@ export default function AdminEvaluationPage() {
                   <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{m.hint}</p>
                 </div>
               ))}
+            </div>
+
+            <div className="border-t border-border pt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setOpenCases(openCases === latest.id ? null : latest.id)}
+              >
+                <ScrollText className="size-3.5" />
+                {openCases === latest.id ? "Hide" : "Show"} what the judge saw ({latest.n_cases}{" "}
+                cases)
+              </Button>
+              {openCases === latest.id && (
+                <div className="mt-3">
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    Every case, the answer generated from the retrieved context, and the judge&apos;s
+                    scores. The highlighted rows are the unanswerable ones — a faithful answer there
+                    admits it doesn&apos;t know instead of inventing a rule.
+                  </p>
+                  <JudgeDetail runId={latest.id} />
+                </div>
+              )}
             </div>
           </section>
         )}
