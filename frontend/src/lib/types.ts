@@ -202,9 +202,11 @@ export type FlashcardDue = {
   card_id: string;
   vocabulary_id: string;
   lemma: string;
-  meaning: string;
+  /** Absent on cards imported from a word list with no gloss. */
+  meaning: string | null;
   examples: { de: string; en: string }[];
-  ipa: string;
+  /** No phonetics unless the word came through a dictionary lookup. */
+  ipa: string | null;
   reps: number;
   interval_days: number;
 };

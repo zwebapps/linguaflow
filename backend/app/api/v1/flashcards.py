@@ -35,7 +35,10 @@ class DueCard(BaseModel):
     vocabulary_id: str
     lemma: str
     meaning: str | None
-    examples: list[dict] | None
+    # A list field is never null: a card built from a word list has no example
+    # sentences, and "absent" should read as an empty list, not as a hole the
+    # client has to guard. `ipa` stays nullable — there is no empty IPA.
+    examples: list[dict]
     ipa: str | None
     reps: int
     interval_days: int
@@ -83,7 +86,7 @@ async def list_due(
             vocabulary_id=str(card.vocabulary_id),
             lemma=card.vocabulary.lemma if card.vocabulary else "",
             meaning=card.vocabulary.meaning if card.vocabulary else None,
-            examples=card.vocabulary.examples if card.vocabulary else None,
+            examples=(card.vocabulary.examples if card.vocabulary else None) or [],
             ipa=card.vocabulary.ipa if card.vocabulary else None,
             reps=card.reps,
             interval_days=card.interval_days,

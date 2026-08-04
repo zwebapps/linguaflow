@@ -205,3 +205,23 @@ def test_patch_me_request_rejects_invalid_cefr_level() -> None:
 def test_grade_request_rejects_invalid_grade() -> None:
     with pytest.raises(PydanticValidationError):
         flashcards.GradeRequest(grade="banana")
+
+
+def test_a_card_without_examples_serialises_as_an_empty_list() -> None:
+    """Regression: cards created in bulk from a word list carry a meaning but
+    no example sentences or IPA — the list has neither. The API declared
+    `examples` nullable while the client typed it as an array and did
+    `card.examples[0]`, so the FIRST such card crashed the whole Flashcards
+    page with "Cannot read properties of null".
+
+    A list field is never null: absent means empty.
+    """
+    import inspect
+
+    from app.api.v1 import flashcards
+
+    src = inspect.getsource(flashcards)
+    # The response model promises a list…
+    assert "examples: list[dict]\n" in src
+    # …and the serialiser guarantees one.
+    assert "or []," in src

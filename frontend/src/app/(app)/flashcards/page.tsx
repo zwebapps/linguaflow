@@ -86,9 +86,17 @@ export default function FlashcardsPage() {
               </>
             ) : (
               <>
-                <p className="text-xl">{card.meaning}</p>
-                <p className="mt-2 font-mono text-sm text-muted-foreground">{card.ipa}</p>
-                <p className="mt-4 text-sm italic">{card.examples[0]?.de}</p>
+                {/* A card imported from a word list has a meaning but no
+                    phonetics or examples — render what exists rather than
+                    empty elements, and never index into a possibly-absent
+                    list (that crashed the whole page on the first such card). */}
+                <p className="text-xl">{card.meaning ?? "—"}</p>
+                {card.ipa && (
+                  <p className="mt-2 font-mono text-sm text-muted-foreground">{card.ipa}</p>
+                )}
+                {card.examples?.[0]?.de && (
+                  <p className="mt-4 text-sm italic">{card.examples[0].de}</p>
+                )}
               </>
             )}
           </button>
