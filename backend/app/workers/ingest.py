@@ -19,6 +19,7 @@ import uuid
 import structlog
 
 from app.core.cache import get_client
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.rag.ingest import ingest_document
 
@@ -72,15 +73,27 @@ async def _consume_forever() -> None:
     if client is None:
         raise RuntimeError("Redis is required to run the ingest worker (check REDIS_URL).")
 
-    log.info("ingest_worker_started", queue=_QUEUE_KEY)
+    log.info(
+        "ingest_worker_started", queue=_QUEUE_KEY, block_seconds=settings.INGEST_BLOCK_SECONDS
+    )
+    failures = 0
     while True:
         try:
             # A finite timeout (rather than blocking forever) means a dead/
             # restarted Redis is noticed and retried instead of hanging BLPOP.
-            item = await client.blpop([_QUEUE_KEY], timeout=5)
+            # The length is tuned for billed-per-command managed Redis — see
+            # INGEST_BLOCK_SECONDS.
+            item = await client.blpop([_QUEUE_KEY], timeout=settings.INGEST_BLOCK_SECONDS)
+            failures = 0
         except Exception as exc:
-            log.warning("ingest_worker_blpop_failed", error=str(exc))
-            await asyncio.sleep(1)
+            # A dropped idle connection is routine on managed Redis and the next
+            # poll reconnects, so don't cry wolf on the first one; escalate only
+            # when failures persist (i.e. the queue really is unreachable).
+            failures += 1
+            log_at = log.warning if failures >= 3 else log.info
+            log_at("ingest_worker_blpop_failed", error=str(exc), consecutive=failures)
+            # Back off gently rather than hammering a struggling broker.
+            await asyncio.sleep(min(30, 2 ** min(failures, 5)))
             continue
         if item is None:
             continue  # timed out with no job — loop again

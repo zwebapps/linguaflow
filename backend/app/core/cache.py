@@ -25,7 +25,17 @@ def get_client() -> aioredis.Redis | None:
     if _client is None:
         try:
             _client = aioredis.from_url(
-                settings.REDIS_URL, decode_responses=True, socket_connect_timeout=2
+                settings.REDIS_URL,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                # The ingest worker parks on BLPOP for INGEST_BLOCK_SECONDS. With
+                # no socket read timeout redis-py waits forever on a connection a
+                # managed provider has quietly dropped; with one SHORTER than the
+                # block it tears down every healthy wait ("Timeout reading from
+                # <host>"). So: comfortably longer than the longest blocking call.
+                socket_timeout=settings.INGEST_BLOCK_SECONDS + 15,
+                socket_keepalive=True,
+                retry_on_timeout=True,
             )
         except Exception as exc:  # pragma: no cover
             log.warning("redis_unavailable", error=str(exc))

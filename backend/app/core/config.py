@@ -93,6 +93,12 @@ class Settings(BaseSettings):
 
     # ── Limits ────────────────────────────────────────────────────────────────
     RATE_LIMIT_PER_MINUTE: int = 30
+
+    # How long the ingest worker blocks on BLPOP per poll. Every poll is one
+    # billable command on a managed Redis: at 5s that is ~430k commands/month
+    # idle — essentially all of Upstash's 500k free tier spent on an empty
+    # queue. 30s costs ~86k/month and adds at most 30s of pickup latency.
+    INGEST_BLOCK_SECONDS: int = 30
     FREE_MONTHLY_AI_CALLS: int = 500
 
     # ── Bootstrap admin ───────────────────────────────────────────────────────
