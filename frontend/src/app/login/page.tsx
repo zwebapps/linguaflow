@@ -23,8 +23,12 @@ export default function LoginPage() {
   const router = useRouter();
   const setSession = useAuthStore((s) => s.setSession);
   const user = useAuthStore((s) => s.user);
-  const [email, setEmail] = useState("learner@deutschflow.ai");
-  const [password, setPassword] = useState("demo12345");
+  // Prefill the seeded demo account ONLY in development. A deployed instance
+  // has no demo learner (bootstrap creates it for local/ci only), so shipping
+  // these as defaults handed every visitor credentials that always fail.
+  const isDev = process.env.NODE_ENV === "development";
+  const [email, setEmail] = useState(isDev ? "learner@deutschflow.ai" : "");
+  const [password, setPassword] = useState(isDev ? "demo12345" : "");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const opsAccount = isOpsEmail(email);
 
