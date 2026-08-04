@@ -185,7 +185,22 @@ async def _fetch_text(url: str) -> str:
 # ── HTML helpers ────────────────────────────────────────────────────────────────
 
 
+_SPACE_BEFORE_PUNCT = re.compile(r"\s+([,.;:!?…»)\]}])")
+
+_BLOCK_TAGS = (
+    "p", "div", "section", "article", "li", "tr", "td", "th",
+    "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "figcaption",
+)
+
+
 def _html_to_text(html_or_soup: str | BeautifulSoup) -> str:
+    """Flatten HTML to text, breaking lines at BLOCK boundaries only.
+
+    `get_text("\\n")` breaks at every string node instead, which splits a
+    sentence wherever it contains inline markup — a graded reader whose
+    vocabulary words are tappable `<span>`s came out one word per line, and
+    chunking then embedded those fragments as if they were sentences.
+    """
     soup = (
         html_or_soup
         if isinstance(html_or_soup, BeautifulSoup)
@@ -193,8 +208,86 @@ def _html_to_text(html_or_soup: str | BeautifulSoup) -> str:
     )
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
-    lines = [ln.strip() for ln in soup.get_text("\n").splitlines()]
+    for tag in soup.find_all("br"):
+        tag.replace_with("\n")
+    # A sentinel inside each block, so the boundary survives get_text(" ").
+    for tag in soup.find_all(_BLOCK_TAGS):
+        tag.append("\n")
+    lines = [
+        # Joining inline elements with a space leaves "fröhliche Musik ." —
+        # the punctuation was its own text node outside the span.
+        _SPACE_BEFORE_PUNCT.sub(r"\1", " ".join(ln.split()))
+        for ln in soup.get_text(" ").splitlines()
+    ]
     return "\n".join(ln for ln in lines if ln)
+
+
+# Page furniture that is never part of the text a learner wants to read.
+# Removed outright — text and all.
+_CHROME_TAGS = (
+    "script", "style", "noscript", "template",
+    "nav", "aside", "footer", "header", "form",
+    # An <audio>/<video> element's child text is the "your browser does not
+    # support…" fallback, which is exactly the line that kept showing up.
+    "audio", "video", "iframe", "svg",
+)
+# Interactive wrappers are UNWRAPPED, not removed: on a graded-reader site the
+# tappable vocabulary words are themselves buttons, so decomposing them deletes
+# words out of the middle of the story ("Überall erklingt fröhliche ." — the
+# noun was inside a button). Keep the text, drop the element.
+_UNWRAP_TAGS = ("button", "a", "label", "summary")
+
+# Generic web furniture, matched per line after extraction. Deliberately short
+# and generic — site-specific copy is not worth chasing, and over-matching
+# would eat real sentences.
+_BOILERPLATE_LINE_RE = re.compile(
+    r"^(?:"
+    r"your browser does not support"          # media-element fallback
+    r"|home\s*(?:/|›|»|>)\s*\S"               # breadcrumb trail
+    r"|(?:\d+:)?\d+:\d{2}\s*[–—-]+\s*[–—:-]+$"  # audio-player timecode "0:00 –:––"
+    r"|(?:click|tap) (?:any|on|the) (?:word|sentence|highlighted)"  # reader UI hint
+    r"|[–—:-]{2,}$"                            # an empty timecode on its own
+    r")",
+    re.IGNORECASE,
+)
+
+# Below this, an <article>/<main> is a teaser card or a stub, not the page's
+# text — fall back to readability rather than ingesting a headline.
+_MIN_MAIN_CHARS = 600
+
+
+def _strip_chrome(soup: BeautifulSoup) -> BeautifulSoup:
+    for tag in soup(list(_CHROME_TAGS)):
+        tag.decompose()
+    for tag in soup(list(_UNWRAP_TAGS)):
+        tag.unwrap()
+    for tag in soup.select('[role="navigation"], [role="banner"], [aria-hidden="true"]'):
+        tag.decompose()
+    return soup
+
+
+def _drop_boilerplate(text: str) -> str:
+    return "\n".join(
+        ln for ln in text.splitlines() if not _BOILERPLATE_LINE_RE.match(ln.strip())
+    )
+
+
+def _main_content_html(soup: BeautifulSoup) -> str | None:
+    """The page's own declaration of where its content is, if it makes one.
+
+    Readability scores blocks by text density, which loses whenever a page puts
+    a denser block beside the article: on a graded-reader page it returned the
+    comprehension quiz and dropped the German story entirely. `<article>` and
+    `<main>` are the author saying outright which block is the content, so they
+    are tried first and readability becomes the fallback for pages that use
+    neither.
+    """
+    candidates = soup.find_all(["article", "main"])
+    if not candidates:
+        return None
+    # Largest wins: "related stories" teasers are also <article> elements.
+    best = max(candidates, key=lambda el: len(el.get_text(" ", strip=True)))
+    return str(best) if len(best.get_text(" ", strip=True)) >= _MIN_MAIN_CHARS else None
 
 
 def _title_from_path(path: str) -> str:
@@ -285,16 +378,27 @@ async def _parse_web(url: str) -> ParsedDoc:
     if is_google_drive_url(url):
         return await _parse_google_drive(url)
     html = await _fetch_text(url)
-    # readability strips nav/ads/sidebars — the difference between a clean lesson
-    # excerpt and a chunk full of "Subscribe to our newsletter".
-    doc = ReadabilityDocument(html)
+
+    # Strip the furniture BEFORE anything tries to pick a content block: nav
+    # menus and sidebars are text too, and both readability's scoring and the
+    # largest-<article> heuristic below are fooled by them.
+    soup = _strip_chrome(BeautifulSoup(html, "lxml"))
+
     # `short_title()` strips the site's boilerplate suffix — readability's
     # `title()` yields "Auf dem Weihnachtsmarkt (A1) | MeloLingua", which is a
     # tab caption, not a story heading. Fall back through the full title, then
     # the URL, so a page with no usable title still ingests.
+    doc = ReadabilityDocument(html)
     title = (doc.short_title() or "").strip() or (doc.title() or "").strip() or url
-    text = _html_to_text(doc.summary(html_partial=True))
-    return ParsedDoc(title=title, text=text, pages=None)
+
+    content = _main_content_html(soup)
+    if content is None:
+        # No semantic container: fall back to readability, which strips
+        # nav/ads/sidebars by density — the difference between a clean lesson
+        # excerpt and a chunk full of "Subscribe to our newsletter".
+        content = ReadabilityDocument(str(soup)).summary(html_partial=True)
+
+    return ParsedDoc(title=title, text=_drop_boilerplate(_html_to_text(content)), pages=None)
 
 
 # ── Google Drive ──────────────────────────────────────────────────────────────

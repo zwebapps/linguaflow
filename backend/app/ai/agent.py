@@ -26,12 +26,14 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.languages import native_name
@@ -46,6 +48,13 @@ log = structlog.get_logger(__name__)
 
 # The agent may loop model→tool→model; bound it so a confused model can't spin.
 MAX_ITERATIONS = 6
+
+# How much of the conversation the tutor is reminded of. Six turns covers the
+# follow-ups learners actually make ("and the plural?", "again in English")
+# without letting an hour-long thread dominate the prompt; the per-turn cap
+# stops one pasted essay from crowding out the other five.
+HISTORY_TURNS = 6
+HISTORY_CHARS_PER_TURN = 2000
 
 # Words that mean "this is a grammar question", which routes to the stronger
 # reasoning model rather than the cheaper conversational one.
@@ -87,6 +96,49 @@ def _title_from(message: str) -> str:
     return (clean[:60].rstrip() + "…") if len(clean) > 60 else (clean or "New conversation")
 
 
+async def load_history(
+    db: AsyncSession,
+    thread_id: uuid.UUID,
+    *,
+    limit: int = HISTORY_TURNS,
+) -> list[tuple[str, str]]:
+    """The last few turns of a thread, oldest first, as (role, content) pairs.
+
+    Without this the tutor answers every message as if it were the first: it
+    can't resolve "say that again in English", loses the topic between turns,
+    and re-asks a question the learner just answered.
+
+    The window is bounded rather than the whole thread — a long conversation
+    would otherwise grow the prompt without limit, and the far end of it stops
+    being relevant well before it stops costing tokens.
+
+    SQL only bounds how much is READ (with headroom for rows the filter below
+    drops); which turns actually survive is decided here, in Python, so the
+    rules are visible and testable without a database.
+    """
+    rows = (
+        (
+            await db.execute(
+                select(Message.role, Message.content)
+                .where(Message.thread_id == thread_id)
+                .order_by(Message.created_at.desc(), Message.id.desc())
+                .limit(limit * 2)
+            )
+        )
+        .tuples()
+        .all()
+    )
+    turns = [
+        (role, content[:HISTORY_CHARS_PER_TURN])
+        for role, content in reversed(rows)
+        # An assistant row is inserted blank and filled as it streams, so a
+        # failed turn leaves one behind; replaying it is noise at best and a
+        # provider error at worst.
+        if role in ("user", "assistant") and (content or "").strip()
+    ]
+    return turns[-limit:]
+
+
 async def _build_tools(db: AsyncSession, user: User) -> list[Any]:
     """Tools are optional — a missing registry must not take the tutor down."""
     try:
@@ -121,6 +173,10 @@ async def stream_tutor_turn(
     policy = await load_policy(db, str(task))
     chain = [model_override] if model_override else policy.chain
     model = chain[0]
+
+    # Read the thread BEFORE the new message is written, so the window is
+    # unambiguously "what was said before this turn".
+    history = await load_history(db, thread.id)
 
     # Persist the learner's message immediately so a mid-stream failure doesn't
     # lose it from the thread.
@@ -241,7 +297,9 @@ async def stream_tutor_turn(
             graph = create_agent(model=llm, tools=tools, system_prompt=system_prompt)
 
             async for ev in graph.astream_events(
-                {"messages": [("user", message)]},
+                # Prior turns first: without them every message is answered as
+                # if it were the first thing said.
+                {"messages": [*history, ("user", message)]},
                 version="v2",
                 config={"recursion_limit": MAX_ITERATIONS * 2},
             ):

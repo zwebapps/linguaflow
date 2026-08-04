@@ -38,10 +38,27 @@ class _FakeUser:
 class _FakeSession:
     """Just enough AsyncSession surface for the agent's writes."""
 
-    def __init__(self) -> None:
+    def __init__(self, history: list[tuple[str, str]] | None = None) -> None:
         self.added: list[Any] = []
         self.commits = 0
         self.deleted: list[Any] = []
+        # Rows `load_history` will read back — the thread as it stood before
+        # this turn.
+        self.history = history or []
+
+    async def execute(self, _stmt: Any) -> Any:
+        """Only `load_history`'s SELECT reaches here; it wants (role, content)
+        newest-first, which it then reverses."""
+        rows = list(reversed(self.history))
+
+        class _Result:
+            def tuples(self_inner):  # noqa: N805 — mimics SQLAlchemy's chaining
+                return self_inner
+
+            def all(self_inner):  # noqa: N805
+                return rows
+
+        return _Result()
 
     def add(self, obj: Any) -> None:
         if not getattr(obj, "id", None):
@@ -112,9 +129,12 @@ def wired(monkeypatch: pytest.MonkeyPatch):
     return recorded
 
 
-def _install_model(monkeypatch: pytest.MonkeyPatch, script: list[dict[str, Any]]) -> None:
+def _install_model(
+    monkeypatch: pytest.MonkeyPatch, script: list[dict[str, Any]]
+) -> FakeToolCallingModel:
     model = FakeToolCallingModel(script=script)
     monkeypatch.setattr(agent_mod, "make_llm", lambda m, **kw: model)
+    return model
 
 
 async def _drain(**kw) -> list[tuple[str, dict]]:
@@ -125,7 +145,8 @@ async def _drain(**kw) -> list[tuple[str, dict]]:
     test that just read `f["data"]` never noticed. Parsing as JSON is the honest
     check.
     """
-    session, user, thread = _FakeSession(), _FakeUser(), _FakeThread()
+    session = _FakeSession(kw.pop("history", None))
+    user, thread = _FakeUser(), _FakeThread()
     frames = []
     async for f in stream_tutor_turn(
         session, user, thread=thread, message=kw.pop("message", "Konjugiere gehen"), **kw
@@ -284,3 +305,76 @@ async def test_injection_attempt_is_logged_but_still_answered(wired, monkeypatch
     kinds = [k for k, _ in frames]
     # We deliberately do not hard-block: the turn completes, the system prompt holds.
     assert kinds[-1] == "done"
+
+
+# ── Conversational memory ─────────────────────────────────────────────────────
+# The thread was always PERSISTED; for a long time none of it was ever SENT.
+# Every message was answered as if it were the first, so the tutor lost the
+# topic between turns and re-asked questions the learner had just answered.
+
+
+def _texts(model: FakeToolCallingModel) -> list[str]:
+    """Every message the model received on its first call, as plain strings."""
+    sent = model.seen_messages[0]
+    return [str(getattr(m, "content", "")) for m in sent]
+
+
+async def test_previous_turns_are_sent_to_the_model(monkeypatch) -> None:
+    model = _install_model(monkeypatch, [{"text": "Die Pluralform ist Häuser."}])
+    await _drain(
+        message="Und der Plural?",
+        history=[("user", "Was heißt Haus?"), ("assistant", "Haus means house.")],
+    )
+    body = " ".join(_texts(model))
+    assert "Was heißt Haus?" in body
+    assert "Haus means house." in body
+
+
+async def test_the_new_message_comes_last(monkeypatch) -> None:
+    """Order is the whole point: a follow-up read before the turn it refers
+    back to is worse than no history at all."""
+    model = _install_model(monkeypatch, [{"text": "ok"}])
+    await _drain(
+        message="Und der Plural?",
+        history=[("user", "Was heißt Haus?"), ("assistant", "Haus means house.")],
+    )
+    assert _texts(model)[-1] == "Und der Plural?"
+
+
+async def test_a_first_message_has_no_history_to_send(monkeypatch) -> None:
+    model = _install_model(monkeypatch, [{"text": "Hallo!"}])
+    await _drain(message="Hallo", history=[])
+    # System prompt + the message itself, and nothing invented in between.
+    assert _texts(model)[-1] == "Hallo"
+
+
+async def test_the_window_is_bounded(monkeypatch) -> None:
+    """An hour-long thread must not grow the prompt without limit."""
+    long_thread = [("user" if i % 2 == 0 else "assistant", f"turn {i}") for i in range(40)]
+    model = _install_model(monkeypatch, [{"text": "ok"}])
+    await _drain(message="weiter", history=long_thread)
+    body = " ".join(_texts(model))
+    assert "turn 39" in body, "the most recent turns are the ones that matter"
+    assert "turn 0" not in body, "the far end of the thread is dropped"
+
+
+async def test_one_huge_turn_cannot_crowd_out_the_rest(monkeypatch) -> None:
+    model = _install_model(monkeypatch, [{"text": "ok"}])
+    await _drain(
+        message="und weiter?",
+        history=[("user", "x" * 50_000), ("assistant", "Ich habe das gelesen.")],
+    )
+    body = " ".join(_texts(model))
+    assert "x" * agent_mod.HISTORY_CHARS_PER_TURN in body
+    assert "x" * (agent_mod.HISTORY_CHARS_PER_TURN + 1) not in body
+    assert "Ich habe das gelesen." in body
+
+
+async def test_a_blank_turn_is_not_replayed(monkeypatch) -> None:
+    """A failed turn leaves an empty assistant row behind; sending it as a
+    message is at best noise and at worst a provider error."""
+    from app.ai.agent import load_history
+
+    session = _FakeSession([("user", "Hallo"), ("assistant", ""), ("user", "Noch da?")])
+    got = await load_history(session, uuid.uuid4())
+    assert ("assistant", "") not in got

@@ -30,6 +30,9 @@ class FakeToolCallingModel(BaseChatModel):
     script: list[dict[str, Any]] = []
     _turn: int = 0
     bound_tools: list[Any] = []
+    # What the agent actually sent — the only way to assert that prior turns
+    # reached the model rather than merely being stored in the database.
+    seen_messages: list[list[BaseMessage]] = []
     usage: dict[str, int] = {"input_tokens": 41, "output_tokens": 17}
 
     model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
@@ -77,6 +80,7 @@ class FakeToolCallingModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
+        self.seen_messages.append(list(messages))
         turn = self._next_turn()
         return ChatResult(generations=[ChatGeneration(message=self._message_for(turn))])
 
@@ -87,6 +91,7 @@ class FakeToolCallingModel(BaseChatModel):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
+        self.seen_messages.append(list(messages))
         turn = self._next_turn()
         return ChatResult(generations=[ChatGeneration(message=self._message_for(turn))])
 
@@ -97,6 +102,7 @@ class FakeToolCallingModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
+        self.seen_messages.append(list(messages))
         turn = self._next_turn()
         if turn.get("tool_calls"):
             msg = self._message_for(turn)
